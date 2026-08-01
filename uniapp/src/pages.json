@@ -1,0 +1,25 @@
+{
+  "pages": [
+    { "path": "pages/index/index", "style": { "navigationBarTitleText": "点餐", "navigationBarBackgroundColor": "#E85D2C", "navigationBarTextStyle": "white" } },
+    { "path": "pages/cart/cart", "style": { "navigationBarTitleText": "购物车" } },
+    { "path": "pages/order/order", "style": { "navigationBarTitleText": "确认订单" } },
+    { "path": "pages/orders/orders", "style": { "navigationBarTitleText": "我的订单" } },
+    { "path": "pages/orders/detail", "style": { "navigationBarTitleText": "订单详情" } }
+  ],
+  "tabBar": {
+    "color": "#888888",
+    "selectedColor": "#E85D2C",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/index/index", "text": "点餐" },
+      { "pagePath": "pages/cart/cart", "text": "购物车" },
+      { "pagePath": "pages/orders/orders", "text": "我的订单" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "拾味堂"
+  }
+}

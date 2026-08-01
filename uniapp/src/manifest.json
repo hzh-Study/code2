@@ -1,0 +1,13 @@
+{
+  "name": "拾味堂",
+  "appid": "",
+  "description": "餐厅堂食+外卖小程序",
+  "h5": {
+    "router": { "base": "./" },
+    "devServer": { "proxy": {} }
+  },
+  "mp-weixin": {
+    "appid": "touristappid",
+    "setting": { "urlCheck": false }
+  }
+}

@@ -1,0 +1,22 @@
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 构建产物
+dist/
+unpackage/
+
+# 本地数据与上传
+backend/*.db
+backend/uploads/
+
+# 环境变量
+.env
+
+# 日志与临时文件
+*.log
+.playwright-cli/
+.DS_Store
