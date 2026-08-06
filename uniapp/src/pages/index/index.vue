@@ -1,255 +1,211 @@
 <template>
   <view class="page">
-    <!-- 品牌头 -->
-    <view class="hero">
-      <view class="logo">拾</view>
-      <view class="hero-text">
-        <view class="title">拾味堂</view>
-        <view class="sub">现点现做 · 堂食 / 外卖</view>
+    <view class="shop-head">
+      <view>
+        <view class="eyebrow">拾味堂 · 今日营业</view>
+        <view class="shop-title">现点现做，认真吃饭</view>
+        <view class="shop-meta">后厨接单后制作 · 预计 15–25 分钟</view>
       </view>
+      <view class="brand-mark">拾</view>
     </view>
 
-    <!-- 分类标签：:scroll-left 让点击的分类自动滚动到可视区 -->
-    <scroll-view class="tabs" scroll-x :scroll-left="tabScrollLeft" scroll-with-animation>
-      <view
-        v-for="cat in categories"
-        :key="cat.id"
-        :id="'tab-' + cat.id"
-        class="tab"
-        :class="{ active: activeCat === cat.id }"
-        @click="selectCat(cat.id)"
-      >{{ cat.name }}</view>
-    </scroll-view>
+    <view class="ordering-layout">
+      <scroll-view class="category-rail" scroll-y>
+        <view
+          v-for="cat in categories"
+          :key="cat.id"
+          class="category-item"
+          :class="{ active: activeCat === cat.id }"
+          role="button"
+          tabindex="0"
+          :aria-label="`查看${cat.name}`"
+          @click="selectCat(cat.id)"
+          @keydown.enter="selectCat(cat.id)"
+        >
+          <view class="category-line"></view>
+          <text>{{ cat.name }}</text>
+        </view>
+      </scroll-view>
 
-    <!-- 菜品列表 -->
-    <view class="dish-list">
-      <view v-for="d in dishes" :key="d.id" class="dish">
-        <image class="dish-img" :src="imgUrl(d.image)" mode="aspectFill" />
-        <view class="dish-info">
-          <view class="dish-name">{{ d.name }}</view>
-          <view class="dish-desc">{{ d.description }}</view>
-          <view class="dish-bottom">
-            <text class="price">¥{{ Number(d.price).toFixed(2) }}</text>
-            <view class="add-btn" @click="addToCart(d)">＋</view>
+      <scroll-view class="dish-scroll" scroll-y>
+        <view class="dish-heading">
+          <view class="dish-heading-main">{{ activeCategoryName }}</view>
+          <view class="dish-heading-sub">{{ dishes.length }} 道在售菜品</view>
+        </view>
+
+        <UiState v-if="loading" type="loading" title="正在准备菜单" description="新鲜菜品马上呈现" />
+        <UiState v-else-if="error" type="error" title="菜单加载失败" description="请检查网络后重新尝试" action-text="重新加载" @action="retry" />
+        <UiState v-else-if="!dishes.length" title="暂无在售菜品" description="可以切换其他分类看看" />
+        <view v-else class="dish-list">
+          <view v-for="dish in dishes" :key="dish.id" class="dish-item">
+            <image v-if="dish.image" class="dish-image" :src="imgUrl(dish.image)" mode="aspectFill" />
+            <view v-else class="dish-image dish-image-empty">暂无图片</view>
+            <view class="dish-info">
+              <view class="dish-name">{{ dish.name }}</view>
+              <view class="dish-desc">{{ dish.description || '今日新鲜制作' }}</view>
+              <view class="dish-bottom">
+                <view class="price"><text class="currency">¥</text>{{ price(dish.price) }}</view>
+                <QuantityStepper v-if="dishQuantity(dish.id)" :model-value="dishQuantity(dish.id)" :name="dish.name" :disabled="isCartUpdating(dish.id)" @change="changeDish(dish, $event)" />
+                <view v-else class="add-button" :class="{ disabled: isCartUpdating(dish.id) }" role="button" tabindex="0" :aria-disabled="isCartUpdating(dish.id)" :aria-label="`加入${dish.name}`" @click="changeDish(dish, 1)" @keydown.enter="changeDish(dish, 1)">+</view>
+              </view>
+            </view>
           </view>
         </view>
+      </scroll-view>
+    </view>
+
+    <view class="cart-safe" :class="{ empty: !cartCount }">
+      <view class="cart-bar">
+        <view class="cart-trigger" role="button" tabindex="0" aria-label="查看购物车" @click="openCartSheet" @keydown.enter="openCartSheet">
+          <view class="cart-symbol">
+            <view class="cart-basket"></view>
+            <text v-if="cartCount" class="badge">{{ cartCount > 99 ? '99+' : cartCount }}</text>
+          </view>
+          <view class="cart-summary">
+            <view class="cart-price">¥{{ price(cartTotal) }}</view>
+            <view class="cart-hint">{{ cartCount ? `已选 ${cartCount} 件` : '还未选择菜品' }}</view>
+          </view>
+        </view>
+        <view class="checkout-button" :class="{ disabled: !cartCount }" role="button" tabindex="0" :aria-disabled="!cartCount" aria-label="去结算" @click="goOrder" @keydown.enter="goOrder">去结算</view>
       </view>
     </view>
 
-    <!-- 底部购物车条 -->
-    <view class="cart-bar" @click="goCart">
-      <view class="cart-icon">
-        🛒
-        <text v-if="cartCount" class="badge">{{ cartCount }}</text>
-      </view>
-      <view class="cart-total">¥{{ cartTotal.toFixed(2) }}</view>
-      <view class="checkout" @click.stop="goOrder">去结算</view>
-    </view>
+    <CartSheet v-model:visible="cartSheetVisible" />
   </view>
 </template>
 
 <script setup>
-import { ref, nextTick, getCurrentInstance } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { loginIfNeeded } from '../../store/user'
+import { cartCount, cartTotal, changeCartQuantity, dishQuantity, isCartUpdating, loadCart } from '../../store/cart'
 import { imgUrl } from '../../config'
-import { getCategories, getDishes, getCart, addCart } from '../../api'
+import { getCategories, getDishes } from '../../api'
+import QuantityStepper from '../../components/QuantityStepper.vue'
+import UiState from '../../components/UiState.vue'
+import CartSheet from '../../components/CartSheet.vue'
 
 const categories = ref([])
 const activeCat = ref(null)
-const tabScrollLeft = ref(0)
 const dishes = ref([])
-const cartCount = ref(0)
-const cartTotal = ref(0)
-let adding = false
-// 修复：分类切换竞态序号，与 orders.vue 的 loadSeq 同理
+const loading = ref(true)
+const error = ref(false)
+const cartSheetVisible = ref(false)
 let dishSeq = 0
 
+const activeCategoryName = computed(() => categories.value.find((item) => item.id === activeCat.value)?.name || '今日菜单')
+
+function price(value) {
+  return Number(value || 0).toFixed(2)
+}
+
 async function loadCategories() {
-  categories.value = await getCategories()
-  if (categories.value.length && activeCat.value == null) {
-    activeCat.value = categories.value[0].id
+  categories.value = await getCategories() || []
+  const requestedCategory = Number(uni.getStorageSync('menu_category_id'))
+  if (requestedCategory && categories.value.some((item) => item.id === requestedCategory)) {
+    activeCat.value = requestedCategory
+    uni.removeStorageSync('menu_category_id')
+  } else if (!categories.value.some((item) => item.id === activeCat.value)) {
+    activeCat.value = categories.value[0]?.id ?? null
   }
 }
+
 async function loadDishes() {
   const seq = ++dishSeq
-  const data = await getDishes(activeCat.value)
-  // 修复：快速切换分类时，先发后至的过期响应会覆盖最新菜品列表，需丢弃
-  if (seq !== dishSeq) return
-  dishes.value = data
+  loading.value = true
+  error.value = false
+  try {
+    const data = await getDishes(activeCat.value)
+    if (seq === dishSeq) dishes.value = data || []
+  } catch (requestError) {
+    if (seq === dishSeq) error.value = true
+  } finally {
+    if (seq === dishSeq) loading.value = false
+  }
 }
-async function loadCart() {
-  // 修复：接口可能返回 null/undefined，兜底为空数组避免 reduce 报错
-  const items = await getCart() || []
-  cartCount.value = items.reduce((s, it) => s + Number(it.quantity || 0), 0)
-  cartTotal.value = items.reduce((s, it) => s + Number(it.subtotal), 0)
-}
-async function selectCat(id) {
-  activeCat.value = id
-  scrollTabIntoView(id)
+
+async function retry() {
+  await loginIfNeeded().catch(() => undefined)
+  await Promise.all([loadCategories(), loadCart().catch(() => undefined)])
   await loadDishes()
 }
 
-// 计算被点击分类相对滚动容器的偏移，滚动到让它露出后续项的位置
-function scrollTabIntoView(id) {
-  nextTick(() => {
-    // #ifdef H5
-    // H5 端真正的滚动层是 uni-scroll-view-content，直接操作其 scrollLeft 最可靠
-    const tabEl = document.getElementById('tab-' + id)
-    if (tabEl) {
-      // 原生 scrollIntoView：让被点项在滚动容器内水平居中，前后项自然露出
-      tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-    }
-    // #endif
-
-    // #ifndef H5
-    // 小程序端用 scroll-view 的 scroll-left 属性驱动
-    const query = uni.createSelectorQuery().in(getCurrentInstance().proxy)
-    query.select('#tab-' + id).boundingClientRect()
-    query.select('.tabs').boundingClientRect()
-    query.select('.tabs').scrollOffset()
-    query.exec((res) => {
-      if (!res || !res[0] || !res[1] || !res[2]) return
-      const tab = res[0]
-      const container = res[1]
-      const curScrollLeft = res[2].scrollLeft
-      const target = curScrollLeft + (tab.left - container.left) - 12
-      tabScrollLeft.value = Math.max(0, target)
-    })
-    // #endif
-  })
+async function selectCat(id) {
+  if (activeCat.value === id) return
+  activeCat.value = id
+  await loadDishes()
 }
-async function addToCart(d) {
-  // 修复：防止快速连续点击导致重复加购
-  if (adding) return
-  adding = true
+
+async function changeDish(dish, delta) {
+  if (isCartUpdating(dish.id)) return
   try {
-    await addCart(d.id, 1)
-    await loadCart()
-    uni.showToast({ title: '已加入', icon: 'success' })
-  } finally {
-    adding = false
+    await changeCartQuantity(dish.id, delta)
+  } catch (e) {
+    uni.showToast({ title: e?.message || '加购失败，请重试', icon: 'none' })
   }
 }
-function goCart() {
-  uni.switchTab({ url: '/pages/cart/cart' })
+
+function openCartSheet() {
+  if (!cartCount.value) return uni.showToast({ title: '还未选择菜品', icon: 'none' })
+  cartSheetVisible.value = true
 }
+
 function goOrder() {
-  if (!cartCount.value) return uni.showToast({ title: '购物车为空', icon: 'none' })
+  if (!cartCount.value) return uni.showToast({ title: '请先选择菜品', icon: 'none' })
   uni.navigateTo({ url: '/pages/order/order' })
 }
 
 onShow(async () => {
   try {
     await loginIfNeeded()
-  } catch (e) {
-    uni.showToast({ title: '登录失败，请重试', icon: 'none' })
-    return
+    await Promise.all([loadCategories(), loadCart().catch(() => undefined)])
+    await loadDishes()
+  } catch (requestError) {
+    loading.value = false
+    if (!categories.value.length || !dishes.value.length) error.value = true
   }
-  await loadCategories()
-  await loadDishes()
-  await loadCart()
 })
 </script>
 
 <style scoped>
-.page { padding-bottom: 80px; }
-
-/* ── 品牌头 ── */
-.hero {
-  display: flex; align-items: center; gap: var(--sp-12);
-  padding: var(--sp-24) var(--sp-16) var(--sp-20);
-  background: linear-gradient(135deg, var(--c-primary), var(--c-primary-light));
-  color: var(--c-text-inverse);
-}
-.logo {
-  width: 48px; height: 48px; border-radius: var(--r-md);
-  background: rgba(255,255,255,.22);
-  backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px; font-weight: 700;
-}
-.title { font-size: var(--font-xl); font-weight: 800; letter-spacing: 0.5px; }
-.sub { font-size: var(--font-xs); opacity: .85; margin-top: 2px; }
-
-/* ── 分类标签 ── */
-.tabs { white-space: nowrap; padding: var(--sp-12) var(--sp-8); background: var(--c-bg-card); }
-.tabs :deep(.uni-scroll-view-content) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.tab {
-  display: inline-block;
-  padding: var(--sp-8) var(--sp-16); margin: 0 var(--sp-4);
-  border-radius: var(--r-full);
-  font-size: var(--font-base); color: var(--c-text-secondary);
-  background: var(--c-bg-soft);
-  transition: all .25s var(--ease);
-}
-.tab.active {
-  color: var(--c-text-inverse);
-  background: var(--c-primary);
-  font-weight: 600;
-  box-shadow: 0 2px 10px rgba(232,93,44,.3);
-}
-
-/* ── 菜品列表 ── */
-.dish-list { padding: var(--sp-12); }
-.dish {
-  display: flex; gap: var(--sp-12);
-  background: var(--c-bg-card);
-  border-radius: var(--r-lg);
-  padding: var(--sp-12);
-  margin-bottom: var(--sp-12);
-  box-shadow: var(--shadow-sm);
-  transition: transform .2s var(--ease), box-shadow .2s var(--ease);
-}
-.dish:active { transform: scale(.98); box-shadow: var(--shadow-md); }
-.dish-img {
-  width: 96px; height: 72px; border-radius: var(--r-sm);
-  background: var(--c-bg-soft); flex-shrink: 0;
-  object-fit: cover;
-}
-.dish-info { flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-height: 72px; }
-.dish-name { font-size: var(--font-md); font-weight: 700; line-height: 1.3; }
-.dish-desc {
-  font-size: var(--font-xs); color: var(--c-text-secondary);
-  margin: var(--sp-4) 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.dish-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
-.price { color: var(--c-primary); font-weight: 800; font-size: var(--font-md); }
-.add-btn {
-  width: 32px; height: 32px; border-radius: 50%;
-  background: var(--c-primary); color: var(--c-text-inverse);
-  text-align: center; line-height: 32px; font-size: 18px;
-  box-shadow: 0 2px 8px rgba(232,93,44,.3);
-  transition: transform .15s var(--ease);
-}
-.add-btn:active { transform: scale(.88); }
-
-/* ── 底部购物车条 ── */
-.cart-bar {
-  position: fixed; left: 0; right: 0; bottom: var(--window-bottom, 0px);
-  height: 60px; background: var(--c-bar-bg);
-  display: flex; align-items: center;
-  padding: 0 var(--sp-16);
-  color: var(--c-text-inverse); z-index: 20;
-  box-shadow: 0 -2px 12px rgba(201,74,30,.25);
-}
-.cart-icon { font-size: 24px; position: relative; }
-.badge {
-  position: absolute; top: -6px; right: -10px;
-  background: var(--c-text-inverse); color: var(--c-primary);
-  font-size: var(--font-xs); border-radius: var(--r-full);
-  font-weight: 700;
-  padding: 0 5px; min-width: 16px; text-align: center;
-  box-shadow: 0 1px 4px rgba(0,0,0,.15);
-}
-.cart-total { flex: 1; margin-left: var(--sp-16); font-weight: 700; font-size: var(--font-md); }
-.checkout {
-  background: var(--c-text-inverse); color: var(--c-primary);
-  padding: var(--sp-8) var(--sp-24); border-radius: var(--r-full);
-  font-weight: 700; font-size: var(--font-base);
-  box-shadow: 0 2px 10px rgba(0,0,0,.12);
-  transition: transform .15s var(--ease);
-}
-.checkout:active { transform: scale(.95); }
+.page { height: 100vh; overflow: hidden; background: var(--c-bg); }
+.shop-head { height: 106px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 16px; background: var(--c-bg-card); border-bottom: 1px solid var(--c-border-light); }
+.eyebrow { color: var(--c-primary); font-size: var(--font-xs); font-weight: 700; letter-spacing: 1px; }
+.shop-title { margin-top: 3px; color: var(--c-text); font-size: var(--font-xl); font-weight: 800; line-height: 1.3; }
+.shop-meta { margin-top: 4px; color: var(--c-text-placeholder); font-size: var(--font-xs); }
+.brand-mark { width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); background: var(--c-text); color: var(--c-text-inverse); font-size: 22px; font-weight: 800; }
+.ordering-layout { height: calc(100vh - 106px - 72px - env(safe-area-inset-bottom)); display: flex; }
+.category-rail { width: 94px; height: 100%; flex-shrink: 0; background: #f1ece5; }
+.category-item { position: relative; min-height: 56px; padding: 0 12px 0 16px; display: flex; align-items: center; box-sizing: border-box; color: var(--c-text-secondary); font-size: var(--font-sm); }
+.category-item.active { background: var(--c-bg-card); color: var(--c-text); font-weight: 700; }
+.category-line { position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 2px 2px 0; background: transparent; }
+.category-item.active .category-line { background: var(--c-primary); }
+.dish-scroll { height: 100%; flex: 1; min-width: 0; background: var(--c-bg-card); }
+.dish-heading { padding: 16px 14px 10px; display: flex; align-items: baseline; justify-content: space-between; }
+.dish-heading-main { font-size: var(--font-md); font-weight: 800; }
+.dish-heading-sub { color: var(--c-text-placeholder); font-size: 11px; }
+.dish-list { padding: 0 14px 18px; }
+.dish-item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--c-border-light); }
+.dish-image { width: 86px; height: 86px; flex-shrink: 0; border-radius: var(--r-md); background: var(--c-bg-soft); }
+.dish-image-empty { display: flex; align-items: center; justify-content: center; color: var(--c-text-placeholder); font-size: 11px; }
+.dish-info { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.dish-name { overflow: hidden; color: var(--c-text); font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.dish-desc { min-height: 34px; margin-top: 4px; overflow: hidden; color: var(--c-text-placeholder); display: -webkit-box; font-size: 11px; line-height: 17px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.dish-bottom { min-height: 44px; margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; }
+.price { color: var(--c-primary); font-size: 17px; font-weight: 800; }
+.currency { margin-right: 2px; font-size: 11px; }
+.add-button { width: 44px; height: 44px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 1px solid var(--c-primary); border-radius: 50%; background: var(--c-primary); color: var(--c-text-inverse); font-size: 22px; font-weight: 500; }
+.cart-safe { position: fixed; right: 0; bottom: var(--window-bottom, 0px); left: 0; z-index: 20; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--c-bg-card); border-top: 1px solid var(--c-border-light); }
+.cart-bar { height: 56px; display: flex; align-items: center; overflow: hidden; border-radius: var(--r-md); background: var(--c-text); color: var(--c-text-inverse); }
+.cart-trigger { min-width: 0; flex: 1; height: 100%; padding-left: 12px; display: flex; align-items: center; }
+.cart-symbol { position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+.cart-basket { width: 23px; height: 15px; box-sizing: border-box; border: 2px solid currentColor; border-top: 0; transform: skew(-7deg); }
+.cart-basket::before { content: ''; position: absolute; width: 17px; height: 7px; margin: -7px 0 0 1px; border: 2px solid currentColor; border-bottom: 0; border-radius: 8px 8px 0 0; }
+.badge { position: absolute; top: 0; right: -1px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: var(--r-full); background: var(--c-primary); color: #fff; font-size: 10px; line-height: 18px; text-align: center; }
+.cart-summary { min-width: 0; flex: 1; margin-left: 8px; }
+.cart-price { font-size: var(--font-md); font-weight: 800; line-height: 1.2; }
+.cart-hint { margin-top: 2px; color: #c8c3bd; font-size: 10px; }
+.checkout-button { align-self: stretch; min-width: 104px; display: flex; align-items: center; justify-content: center; background: var(--c-primary); color: #fff; font-size: var(--font-base); font-weight: 700; }
+.checkout-button.disabled { background: #5f5a54; color: #c8c3bd; }
+.category-item:active, .step-button:active, .add-button:active, .checkout-button:active { opacity: .72; }
 </style>

@@ -1,5 +1,5 @@
 """管理后台：菜品管理（含下架，支持分页/筛选）。"""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -16,7 +16,7 @@ router = APIRouter()
 
 @router.get("/dishes")
 def list_dishes(
-    category_id: int = Query(None),
+    category_id: int | None = Query(None),
     keyword: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -109,7 +109,9 @@ def delete_dish(
     has_order_ref = db.query(OrderItem).filter(OrderItem.dish_id == dish_id).first() is not None
     if has_order_ref:
         return R.fail(3005, "该菜品已被订单引用，无法删除，建议下架")
-    db.query(Cart).filter(Cart.dish_id == dish_id).delete()
+    cart_count = db.query(Cart).filter(Cart.dish_id == dish_id).count()
+    if cart_count > 0:
+        raise HTTPException(status_code=400, detail=f"该菜品已被 {cart_count} 个购物车引用，请改为下架而非删除")
     db.delete(dish)
     db.commit()
     return R.ok(msg="已删除")

@@ -12,8 +12,8 @@ export const updateCart = (dishId, quantity) =>
   request('/client/cart/update', 'POST', { dish_id: dishId, quantity })
 export const clearCart = () => request('/client/cart/clear', 'POST')
 
-export const createOrder = (diningMode, address) =>
-  request('/client/orders', 'POST', { dining_mode: diningMode, address })
+export const createOrder = (diningMode) =>
+  request('/client/orders', 'POST', { dining_mode: diningMode })
 export const getOrders = (status) =>
   request('/client/orders' + (status != null ? `?status=${status}` : ''))
 export const getOrderDetail = (id) => request(`/client/orders/${id}`)

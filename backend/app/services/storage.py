@@ -5,6 +5,7 @@ import uuid
 from fastapi import HTTPException, UploadFile
 
 from app.config import STATIC_URL_PREFIX, UPLOAD_DIR
+from app.utils.time import now
 
 ALLOWED_EXT = {".jpg", ".jpeg", ".png"}
 MAX_SIZE = 2 * 1024 * 1024  # 2MB
@@ -22,20 +23,19 @@ def save_upload(file: UploadFile, sub_dir: str = "dishes") -> str:
     if file.content_type not in ("image/jpeg", "image/png"):
         raise HTTPException(status_code=400, detail="仅支持 jpg/png 图片")
     # 分块读取累计大小，超限立即终止
-    content = b""
+    content = bytearray()
     while True:
         chunk = file.file.read(64 * 1024)
         if not chunk:
             break
-        content += chunk
+        content.extend(chunk)
         if len(content) > MAX_SIZE:
             raise HTTPException(status_code=400, detail="图片需小于 2MB")
     if not content.startswith(b'\xff\xd8') and not content.startswith(b'\x89PNG'):
         raise HTTPException(status_code=400, detail="文件内容非有效图片")
 
-    from datetime import datetime
-    now = datetime.now()
-    rel_dir = os.path.join(sub_dir, f"{now.year}", f"{now.month:02d}")
+    current_time = now()
+    rel_dir = os.path.join(sub_dir, f"{current_time.year}", f"{current_time.month:02d}")
     abs_dir = os.path.join(UPLOAD_DIR, rel_dir)
     _ensure_dir(abs_dir)
 

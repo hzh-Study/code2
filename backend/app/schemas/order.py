@@ -1,22 +1,27 @@
 """订单相关 schema。"""
+from decimal import Decimal
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrderItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     dish_id: int
     dish_name: str
-    price: float
+    price: Decimal
     quantity: int
-    subtotal: float
+    subtotal: Decimal
 
 
 class OrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     order_no: str
-    total_amount: float
+    total_amount: Decimal
     dining_mode: int  # 1=堂食,2=打包
     status: int  # 1=待支付,2=待出餐,3=已完成,4=已取消
     pay_status: int
@@ -30,7 +35,7 @@ class OrderOut(BaseModel):
 
 class CreateOrderRequest(BaseModel):
     dining_mode: Literal[1, 2]  # 1=堂食,2=打包，必填
-    address: Optional[str] = None
+    address: Optional[str] = Field(default=None, max_length=255)
 
 
 class CreateOrderResponse(BaseModel):

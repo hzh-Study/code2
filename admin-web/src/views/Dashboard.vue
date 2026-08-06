@@ -1,52 +1,66 @@
 <template>
   <div class="dashboard" v-loading="loading">
-    <el-row :gutter="20" class="stat-row">
-      <el-col :span="8">
-        <el-card class="stat-card" :body-style="{ padding: '24px' }">
-          <div class="stat-icon-wrap icon-orders">
-            <el-icon :size="22"><List /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">今日订单</div>
-            <div class="stat-value">{{ stats.today_orders }}</div>
-            <div class="stat-sub">笔交易</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card class="stat-card" :body-style="{ padding: '24px' }">
-          <div class="stat-icon-wrap icon-sales">
-            <el-icon :size="22"><Coin /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">今日销售额</div>
-            <div class="stat-value">¥{{ Number(stats.today_sales || 0).toFixed(2) }}</div>
-            <div class="stat-sub">已支付</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card class="stat-card" :body-style="{ padding: '24px' }">
-          <div class="stat-icon-wrap icon-dishes">
-            <el-icon :size="22"><Dish /></el-icon>
-          </div>
-          <div class="stat-content">
-            <div class="stat-label">在售菜品</div>
-            <div class="stat-value">{{ stats.on_sale_dishes }}</div>
-            <div class="stat-sub">道菜品</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <header class="page-intro">
+      <div>
+        <p class="date-label">{{ todayLabel }}</p>
+        <h1>经营看板</h1>
+      </div>
+      <el-button plain :loading="loading" :disabled="loading" @click="load">刷新数据</el-button>
+    </header>
 
-    <el-card class="recent-card">
-      <template #header>
-        <div class="recent-header">
-          <span class="recent-title">最近订单</span>
-          <span class="recent-count">共 {{ recent.length }} 条</span>
+    <div v-if="error && !loading" class="request-state" role="alert">
+      <strong>经营数据加载失败</strong><span>请检查网络连接后重新尝试</span><el-button type="primary" @click="load">重新加载</el-button>
+    </div>
+    <template v-else>
+    <section class="metrics" aria-label="今日关键指标">
+      <div class="metric">
+        <span class="metric-label">今日订单数</span>
+        <strong>{{ stats.today_orders }}</strong>
+        <small>今日创建的全部订单</small>
+      </div>
+      <div class="metric">
+        <span class="metric-label">今日销售额</span>
+        <strong>¥{{ Number(stats.today_sales || 0).toFixed(2) }}</strong>
+        <small>今日已支付订单合计</small>
+      </div>
+      <div class="metric">
+        <span class="metric-label">在售菜品数</span>
+        <strong>{{ stats.on_sale_dishes }}</strong>
+        <small>当前可供顾客下单</small>
+      </div>
+    </section>
+
+    <section class="work-row">
+      <div class="pending-panel">
+        <div class="section-heading">
+          <div>
+            <h2>待处理</h2>
+            <p>优先跟进需要出餐的订单</p>
+          </div>
+          <el-button text type="primary" @click="$router.push('/orders')">查看订单</el-button>
         </div>
-      </template>
-      <el-table :data="recent" stripe>
+        <div class="pending-value">
+          <span>{{ pendingOrders }}</span>
+          <div><strong>笔待出餐</strong><small>请及时确认并完成出餐</small></div>
+        </div>
+      </div>
+      <div class="status-panel">
+        <div class="status-item"><span>待支付</span><strong>{{ statusCounts.pendingPay }}</strong></div>
+        <div class="status-item"><span>待出餐</span><strong class="accent">{{ statusCounts.pendingMeal }}</strong></div>
+        <div class="status-item"><span>已完成</span><strong>{{ statusCounts.completed }}</strong></div>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <div class="section-heading table-heading">
+        <div>
+          <h2>最近订单</h2>
+          <p>最近 {{ recent.length }} 笔订单的履约状态</p>
+        </div>
+        <el-button text type="primary" @click="$router.push('/orders')">全部订单</el-button>
+      </div>
+      <div class="table-scroll">
+      <el-table :data="recent" :empty-text="loading ? '正在加载' : '暂无近期订单'">
         <el-table-column prop="order_no" label="订单号" width="200">
           <template #default="{ row }">
             <span class="order-no">{{ row.order_no }}</span>
@@ -55,7 +69,7 @@
         <el-table-column prop="username" label="用户" width="120" />
         <el-table-column prop="dining_mode_label" label="方式" width="90">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.dining_mode_label === '堂食' ? '' : 'warning'" effect="plain">{{ row.dining_mode_label }}</el-tag>
+            <span class="mode-label">{{ row.dining_mode_label }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="total_amount" label="金额" width="110">
@@ -65,34 +79,38 @@
         </el-table-column>
         <el-table-column prop="status_label" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status_label)" size="small">{{ row.status_label }}</el-tag>
+            <span class="status-pill" :class="statusClass(row.status)">{{ row.status_label }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="下单时间" />
       </el-table>
-    </el-card>
+      </div>
+    </section>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import { List, Coin, Dish } from '@element-plus/icons-vue'
+import { computed, onMounted, ref } from 'vue'
 import { dashboard } from '@/api/order'
+import { useAutoRefresh } from '@/composables/useAutoRefresh'
 
 const loading = ref(false)
 const stats = ref({ today_orders: 0, today_sales: 0, on_sale_dishes: 0 })
 const recent = ref([])
+const error = ref(false)
+const statusCounts = ref({ pendingPay: 0, pendingMeal: 0, completed: 0 })
 
-function statusTagType(label) {
-  if (label && label.includes('取消')) return 'info'
-  if (label && label.includes('完成')) return 'success'
-  if (label && label.includes('待出')) return 'primary'
-  if (label && label.includes('待支付')) return 'warning'
-  return ''
+const todayLabel = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())
+const pendingOrders = computed(() => statusCounts.value.pendingMeal)
+
+function statusClass(status) {
+  return { 1: 'is-neutral', 2: 'is-warning', 3: 'is-success', 4: 'is-muted' }[status] || 'is-neutral'
 }
 
-onMounted(async () => {
+async function load() {
   loading.value = true
+  error.value = false
   try {
     const data = await dashboard() || {}
     stats.value = {
@@ -100,118 +118,67 @@ onMounted(async () => {
       today_sales: data.today_sales || 0,
       on_sale_dishes: data.on_sale_dishes || 0
     }
+    const counts = data.status_counts || {}
+    statusCounts.value = {
+      pendingPay: Number(counts.pending_pay || 0),
+      pendingMeal: Number(counts.pending_meal || 0),
+      completed: Number(counts.completed || 0)
+    }
     recent.value = data.recent_orders || []
   } catch (e) {
-    // 错误已在 request.js 统一提示
+    error.value = true
   } finally {
     loading.value = false
   }
+}
+
+useAutoRefresh(load, 5000)
+
+onMounted(() => {
+  load()
 })
 </script>
 
 <style scoped>
-.dashboard {
-  min-height: 200px;
-}
-
-.stat-row {
-  margin-bottom: var(--space-lg);
-}
-
-.stat-card {
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  transition: all var(--duration-normal) var(--ease-out);
-}
-
-.stat-card:hover {
-  transform: translateY(-3px);
-}
-
-.stat-card :deep(.el-card__body) {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.stat-icon-wrap {
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.icon-orders {
-  background: linear-gradient(135deg, #1890ff, #40a9ff);
-  box-shadow: 0 4px 14px rgba(24, 144, 255, 0.3);
-}
-
-.icon-sales {
-  background: var(--brand-gradient);
-  box-shadow: 0 4px 14px rgba(232, 93, 44, 0.3);
-}
-
-.icon-dishes {
-  background: linear-gradient(135deg, #52c41a, #73d13d);
-  box-shadow: 0 4px 14px rgba(82, 196, 26, 0.3);
-}
-
-.stat-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.stat-label {
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: var(--font-weight-bold);
-  color: var(--text);
-  line-height: var(--line-height-tight);
-  margin-bottom: 2px;
-}
-
-.stat-sub {
-  color: var(--text-placeholder);
-  font-size: var(--font-size-xs);
-}
-
-.recent-card {
-  border-radius: var(--radius-lg);
-}
-
-.recent-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.recent-title {
-  font-weight: var(--font-weight-semibold);
-  font-size: var(--font-size-md);
-}
-
-.recent-count {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
-}
-
-.order-no {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.amount {
-  font-weight: var(--font-weight-semibold);
-  color: var(--brand);
+.dashboard { max-width: 1440px; margin: 0 auto; min-height: 240px; }
+.page-intro { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: var(--space-xl); }
+.page-intro h1 { margin: 4px 0 0; font-size: var(--font-size-2xl); }
+.date-label { margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-lg); margin-bottom: var(--space-lg); }
+.metric { position: relative; padding: 24px 28px; min-width: 0; }
+.metric + .metric::before { content: ''; position: absolute; left: 0; top: 22px; bottom: 22px; width: 1px; background: var(--border-light); }
+.metric-label { display: block; color: var(--text-secondary); font-size: var(--font-size-sm); }
+.metric strong { display: block; margin: 8px 0 4px; font-size: clamp(28px, 3vw, 38px); line-height: 1.2; }
+.metric small, .section-heading p, .pending-value small { display: block; color: var(--text-muted); font-size: var(--font-size-xs); }
+.work-row { display: grid; grid-template-columns: minmax(280px, 1.1fr) minmax(320px, 1fr); gap: var(--space-lg); margin-bottom: var(--space-lg); }
+.pending-panel, .status-panel, .table-panel { background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-lg); }
+.pending-panel { padding: var(--space-lg) var(--space-xl); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+.section-heading h2 { margin: 0 0 3px; font-size: var(--font-size-lg); }
+.section-heading p { margin: 0; }
+.pending-value { display: flex; align-items: center; gap: var(--space-md); margin-top: var(--space-xl); }
+.pending-value > span { color: var(--brand); font-size: 42px; font-weight: var(--font-weight-bold); line-height: 1; }
+.pending-value strong { display: block; font-size: var(--font-size-sm); margin-bottom: 3px; }
+.status-panel { display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; padding: var(--space-lg); }
+.status-item { text-align: center; padding: var(--space-sm); }
+.status-item + .status-item { border-left: 1px solid var(--border-light); }
+.status-item span { display: block; color: var(--text-muted); font-size: var(--font-size-xs); }
+.status-item strong { display: block; margin-top: var(--space-xs); font-size: var(--font-size-xl); }
+.status-item .accent { color: var(--brand); }
+.table-panel { padding: var(--space-lg) var(--space-xl) var(--space-sm); }
+.table-heading { margin-bottom: var(--space-md); }
+.table-scroll { overflow-x: auto; }
+.table-scroll .el-table { min-width: 760px; }
+.order-no { font-family: var(--font-mono); font-size: var(--font-size-sm); color: var(--text-secondary); }
+.amount { font-weight: var(--font-weight-semibold); color: var(--text); }
+.mode-label { color: var(--text-secondary); }
+@media (max-width: 900px) { .work-row { grid-template-columns: 1fr; } }
+@media (max-width: 680px) {
+  .metrics { grid-template-columns: 1fr; }
+  .metric { padding: var(--space-lg); }
+  .metric + .metric::before { left: var(--space-lg); right: var(--space-lg); top: 0; bottom: auto; width: auto; height: 1px; }
+  .status-panel { padding: var(--space-sm); }
+  .table-panel { padding: var(--space-md) var(--space-sm) var(--space-xs); }
+  .page-intro { align-items: center; }
 }
 </style>

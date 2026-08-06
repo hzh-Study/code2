@@ -7,7 +7,7 @@ from app.database import get_db
 from app.deps import get_current_user_id
 from app.models.cart import Cart
 from app.models.dish import Dish
-from app.schemas.cart import CartAdd, CartUpdate
+from app.schemas.cart import MAX_CART_QUANTITY, CartAdd, CartUpdate
 from app.schemas.common import R
 
 router = APIRouter()
@@ -39,21 +39,34 @@ def add_cart(body: CartAdd, user_id: int = Depends(get_current_user_id), db: Ses
         raise HTTPException(status_code=400, detail="菜品不存在或已下架")
     if body.quantity <= 0:
         raise HTTPException(status_code=400, detail="数量必须大于 0")
-    item = db.query(Cart).filter(Cart.user_id == user_id, Cart.dish_id == body.dish_id).first()
-    if item:
-        item.quantity += body.quantity
+    item_filter = (Cart.user_id == user_id, Cart.dish_id == body.dish_id)
+    updated = db.query(Cart).filter(
+        *item_filter,
+        Cart.quantity <= MAX_CART_QUANTITY - body.quantity,
+    ).update({Cart.quantity: Cart.quantity + body.quantity}, synchronize_session=False)
+    if updated:
         db.commit()
-    else:
-        try:
-            item = Cart(user_id=user_id, dish_id=body.dish_id, quantity=body.quantity)
-            db.add(item)
-            db.commit()
-        except IntegrityError:
+        return R.ok(msg="已加入购物车")
+
+    if db.query(Cart.id).filter(*item_filter).first():
+        raise HTTPException(status_code=400, detail=f"单个菜品最多选择 {MAX_CART_QUANTITY} 份")
+
+    try:
+        db.add(Cart(user_id=user_id, dish_id=body.dish_id, quantity=body.quantity))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # 另一个请求刚插入相同行时，再做一次带上限的原子累加。
+        updated = db.query(Cart).filter(
+            *item_filter,
+            Cart.quantity <= MAX_CART_QUANTITY - body.quantity,
+        ).update({Cart.quantity: Cart.quantity + body.quantity}, synchronize_session=False)
+        if not updated:
             db.rollback()
-            item = db.query(Cart).filter(Cart.user_id == user_id, Cart.dish_id == body.dish_id).first()
-            if item:
-                item.quantity += body.quantity
-            db.commit()
+            if db.query(Cart.id).filter(*item_filter).first():
+                raise HTTPException(status_code=400, detail=f"单个菜品最多选择 {MAX_CART_QUANTITY} 份")
+            raise HTTPException(status_code=500, detail="购物车数据异常")
+        db.commit()
     return R.ok(msg="已加入购物车")
 
 
@@ -66,6 +79,9 @@ def update_cart(body: CartUpdate, user_id: int = Depends(get_current_user_id), d
         db.delete(item)
         db.commit()
         return R.ok(msg="已移除")
+    dish = db.query(Dish).filter(Dish.id == item.dish_id).first()
+    if not dish or dish.status != 1:
+        raise HTTPException(status_code=400, detail="菜品已下架")
     item.quantity = body.quantity
     db.commit()
     return R.ok(msg="已更新")

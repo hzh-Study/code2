@@ -1,4 +1,6 @@
 """小程序端：菜品（只读，仅返回在售）。"""
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -31,7 +33,7 @@ def hot_dishes(limit: int = Query(6, ge=1, le=50), db: Session = Depends(get_db)
 
 
 @router.get("/dishes")
-def list_dishes(category_id: int = Query(None), db: Session = Depends(get_db)):
+def list_dishes(category_id: int | None = Query(None), db: Session = Depends(get_db)):
     from app.models.dish import Dish
 
     q = db.query(Dish).filter(Dish.status == 1)

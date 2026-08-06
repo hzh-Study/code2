@@ -1,6 +1,7 @@
 """管理后台：分类管理。"""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.deps import get_current_admin_id
@@ -24,9 +25,16 @@ def create_category(
     _: int = Depends(get_current_admin_id),
     db: Session = Depends(get_db),
 ):
+    existing = db.query(Category).filter(Category.name == body.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="分类名已存在")
     cat = Category(name=body.name, sort_order=body.sort_order)
     db.add(cat)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="分类名已存在") from exc
     db.refresh(cat)
     return R.ok({"id": cat.id, "name": cat.name, "sort_order": cat.sort_order})
 
@@ -41,11 +49,18 @@ def update_category(
     cat = db.query(Category).filter(Category.id == cat_id).first()
     if not cat:
         return R.fail(3002, "分类不存在")
-    if body.name is not None:
+    if body.name is not None and body.name != cat.name:
+        existing = db.query(Category).filter(Category.name == body.name, Category.id != cat_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="分类名已存在")
         cat.name = body.name
     if body.sort_order is not None:
         cat.sort_order = body.sort_order
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="分类名已存在") from exc
     return R.ok(msg="已更新")
 
 

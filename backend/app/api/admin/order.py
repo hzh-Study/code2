@@ -14,8 +14,10 @@ from app.services.order_state import (
     DINING_LABELS,
     STATUS_LABELS,
     can_complete,
+    expire_pending_orders,
     mark_done,
 )
+from app.utils.time import format_utc, local_date_to_utc
 
 router = APIRouter()
 
@@ -39,8 +41,8 @@ def _serialize(order: Order, user: User | None, items: list[OrderItem]) -> dict:
         "status": order.status,
         "status_label": STATUS_LABELS.get(order.status, ""),
         "pay_status": order.pay_status,
-        "created_at": order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else None,
-        "paid_at": order.paid_at.strftime("%Y-%m-%d %H:%M:%S") if order.paid_at else None,
+        "created_at": format_utc(order.created_at),
+        "paid_at": format_utc(order.paid_at),
         "detail": dish_names,
         "items": item_list,
     }
@@ -51,20 +53,25 @@ def list_orders(
     status: int = Query(None),
     start: str = Query(None),
     end: str = Query(None),
+    keyword: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     _: int = Depends(get_current_admin_id),
     db: Session = Depends(get_db),
 ):
+    expire_pending_orders(db)
     q = db.query(Order)
     if status is not None:
         q = q.filter(Order.status == status)
+    if keyword is not None and keyword.strip():
+        escaped = keyword.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        q = q.filter(Order.order_no.like(f"%{escaped}%", escape="\\"))
     try:
         if start:
-            q = q.filter(Order.created_at >= datetime.strptime(start, "%Y-%m-%d"))
+            q = q.filter(Order.created_at >= local_date_to_utc(datetime.strptime(start, "%Y-%m-%d").date()))
         if end:
-            # 结束日期包含当天（次日 0 点前）
-            q = q.filter(Order.created_at < datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1))
+            end_date = datetime.strptime(end, "%Y-%m-%d").date() + timedelta(days=1)
+            q = q.filter(Order.created_at < local_date_to_utc(end_date))
     except ValueError:
         return R.fail(3007, "日期格式错误，应为 YYYY-MM-DD")
     total = q.count()
@@ -109,5 +116,6 @@ def update_status(
         return R.fail(3005, "订单不存在")
     if not can_complete(order):
         return R.fail(3006, "仅待出餐订单可标记完成")
-    mark_done(db, order)
+    if not mark_done(db, order):
+        return R.fail(3006, "订单状态已变化，请刷新后重试")
     return R.ok(msg="已标记完成")

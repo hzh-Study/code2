@@ -1,48 +1,65 @@
 <template>
-  <el-card shadow="never" class="page">
-    <template #header>
-      <div class="head">
+  <section class="page-panel">
+      <div class="page-head">
+        <div><h1>菜品管理</h1><p>集中维护菜品信息、分类与售卖状态</p></div>
+        <el-button type="primary" :icon="Plus" :disabled="loading || !categories.length" @click="openCreate">新增菜品</el-button>
+      </div>
+      <div class="toolbar">
         <div class="filters">
-          <el-select v-model="filters.category_id" placeholder="全部分类" clearable style="width: 150px" @change="resetAndLoad">
+          <el-input
+            v-model="filters.keyword"
+            placeholder="搜索菜品名称"
+            clearable
+            :prefix-icon="Search"
+            @input="onKeywordInput"
+            @clear="resetAndLoad"
+          />
+          <el-select v-model="filters.category_id" placeholder="全部分类" clearable @change="resetAndLoad">
             <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
-          <el-input v-model="filters.keyword" placeholder="搜索菜名" clearable style="width: 180px" @keyup.enter="resetAndLoad" @clear="resetAndLoad" />
-          <el-button :icon="Search" @click="resetAndLoad">查询</el-button>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openCreate">新增菜品</el-button>
+        <span class="result-count">共 {{ total }} 道菜品</span>
       </div>
-    </template>
-
-    <el-row :gutter="20" v-loading="loading">
-      <el-col v-for="d in list" :key="d.id" :xs="12" :sm="8" :md="6" :lg="6" class="card-col">
-        <el-card shadow="hover" class="dish-card" :body-style="{ padding: '0' }">
-          <div class="thumb" :style="{ backgroundImage: d.image ? `url(${resolveImg(d.image)})` : 'none' }">
-            <span v-if="d.status === 0" class="off-tag">已下架</span>
-          </div>
-          <div class="info">
-            <div class="name">{{ d.name }}</div>
-            <div class="meta">
-              <span class="price">¥{{ Number(d.price || 0).toFixed(2) }}</span>
-              <span class="cat">{{ d.category_name }}</span>
+    <div v-if="error && !loading" class="request-state" role="alert"><strong>菜品加载失败</strong><span>请检查网络连接后重新尝试</span><el-button type="primary" @click="load">重新加载</el-button></div>
+    <div v-else class="table-scroll">
+      <el-table :data="list" v-loading="loading" class="dish-table" empty-text="暂无符合条件的菜品">
+        <el-table-column label="#" width="64" align="center">
+          <template #default="{ $index }">
+            <span class="row-index">{{ (filters.page - 1) * filters.page_size + $index + 1 }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="菜品" min-width="260">
+          <template #default="{ row }">
+            <div class="dish-cell">
+              <div class="thumb"><img v-if="row.image" :src="resolveImg(row.image)" :alt="row.name"><span v-else>暂无图片</span></div>
+              <div class="dish-copy"><strong>{{ row.name }}</strong><span>{{ row.description || '暂无简介' }}</span></div>
             </div>
-            <div class="desc">{{ d.description }}</div>
-            <div class="actions">
-              <el-switch :model-value="d.status === 1" @change="onToggle(d)" active-text="在售" inactive-text="下架" inline-prompt />
-              <div class="action-btns">
-                <el-button text type="primary" @click="openEdit(d)">编辑</el-button>
-                <el-button text type="danger" @click="onDelete(d)">删除</el-button>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+          </template>
+        </el-table-column>
+        <el-table-column label="价格" width="120"><template #default="{ row }"><span class="price">¥{{ Number(row.price || 0).toFixed(2) }}</span></template></el-table-column>
+        <el-table-column prop="category_name" label="分类" width="150" />
+        <el-table-column label="状态" width="110"><template #default="{ row }"><span class="status-pill" :class="row.status === 1 ? 'is-sale' : 'is-off'">{{ row.status === 1 ? '在售' : '已下架' }}</span></template></el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }"><div class="action-btns"><el-button text type="primary" :disabled="deletingId !== null || togglingId !== null" @click="openEdit(row)">编辑</el-button><el-button text :loading="togglingId === row.id" :disabled="deletingId !== null || togglingId !== null" @click="onToggle(row)">{{ row.status === 1 ? '下架' : '上架' }}</el-button><el-button text type="danger" :loading="deletingId === row.id" :disabled="deletingId !== null || togglingId !== null" @click="onDelete(row)">删除</el-button></div></template>
+        </el-table-column>
+      </el-table>
+    </div>
 
-    <el-pagination class="pager" layout="total, prev, pager, next" :total="total" :current-page="filters.page"
-      :page-size="filters.page_size" @current-change="(p) => { filters.page = p; load() }" />
+    <el-pagination
+      class="pager"
+      layout="total, sizes, prev, pager, next, jumper"
+      :total="total"
+      :current-page="filters.page"
+      :page-size="filters.page_size"
+      :page-sizes="[10, 20, 50]"
+      @current-change="(p) => { filters.page = p; load() }"
+      @size-change="onPageSizeChange"
+    />
 
-    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑菜品' : '新增菜品'" width="520px" class="custom-dialog">
-      <el-form label-width="80px" class="dialog-form">
+    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑菜品' : '新增菜品'"
+      width="min(520px, calc(100vw - 24px))" class="custom-dialog" :before-close="beforeDialogClose"
+      :close-on-click-modal="!formBusy" :close-on-press-escape="!formBusy" :show-close="!formBusy">
+      <el-form label-width="80px" class="dialog-form" :disabled="saving">
         <el-form-item label="菜名">
           <el-input v-model="form.name" placeholder="菜品名称" />
         </el-form-item>
@@ -56,7 +73,7 @@
         </el-form-item>
         <el-form-item label="图片">
           <el-upload class="avatar-uploader" :show-file-list="false" :auto-upload="true"
-            :http-request="onUpload" accept="image/*" v-loading="uploading">
+            :http-request="onUpload" accept=".jpg,.jpeg,.png,image/jpeg,image/png" :disabled="formBusy" v-loading="uploading">
             <img v-if="form.image" :src="resolveImg(form.image)" class="avatar" />
             <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
           </el-upload>
@@ -74,16 +91,16 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
+          <el-button :disabled="formBusy" @click="closeDialog">取消</el-button>
+          <el-button type="primary" :loading="saving" :disabled="uploading" @click="onSave">保存</el-button>
         </div>
       </template>
     </el-dialog>
-  </el-card>
+  </section>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listCategories } from '@/api/category'
@@ -96,39 +113,91 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
-const deleting = ref(false)
-const filters = reactive({ category_id: null, keyword: '', page: 1, page_size: 12 })
+const deletingId = ref(null)
+const togglingId = ref(null)
+const error = ref(false)
+const filters = reactive({ category_id: null, keyword: '', page: 1, page_size: 20 })
 
 const form = reactive({ id: null, name: '', price: 0, category_id: null, image: '', description: '', status: 1 })
+const formBusy = computed(() => saving.value || uploading.value)
+let loadSeq = 0
+let formSession = 0
+let keywordTimer = null
 
-function resolveImg(path) {
-  if (!path) return ''
-  if (path.startsWith('http')) return path
-  return `${import.meta.env.VITE_API_BASE ? import.meta.env.VITE_API_BASE.replace(/\/api$/, '') : ''}${path}`
-}
+function resolveImg(img) {
+  if (!img) return ''
+  const source = String(img).trim()
+  if (/^(?:https?:|data:|blob:)/i.test(source) || source.startsWith('//')) return source
 
-async function load() {
-  loading.value = true
+  const staticBase = import.meta.env.VITE_STATIC_BASE?.trim()
+  if (staticBase) {
+    return `${staticBase.replace(/\/+$/, '')}/${source.replace(/^\/+/, '')}`
+  }
+
   try {
-    const data = await listDishes(filters) || {}
-    list.value = data.list || []
-    total.value = data.total || 0
-  } finally {
-    loading.value = false
+    const apiUrl = new URL(import.meta.env.VITE_API_BASE || '/api', window.location.origin)
+    return new URL(source.startsWith('/') ? source : `/${source}`, `${apiUrl.origin}/`).href
+  } catch {
+    return source
   }
 }
-function resetAndLoad() {
+
+function onKeywordInput() {
+  clearTimeout(keywordTimer)
+  keywordTimer = setTimeout(() => {
+    resetAndLoad()
+  }, 300)
+}
+
+function onPageSizeChange(size) {
+  filters.page_size = size
   filters.page = 1
   load()
 }
 
+async function load() {
+  const requestSeq = ++loadSeq
+  loading.value = true
+  error.value = false
+  try {
+    const params = Object.fromEntries(
+      Object.entries(filters).filter(([_, v]) => v != null && v !== '')
+    )
+    const data = await listDishes(params) || {}
+    if (requestSeq !== loadSeq) return
+    list.value = data.list || []
+    total.value = data.total || 0
+  } catch (requestError) {
+    if (requestSeq === loadSeq) error.value = true
+  } finally {
+    if (requestSeq === loadSeq) loading.value = false
+  }
+}
+function resetAndLoad() {
+  filters.page = 1
+  return load()
+}
+
 function openCreate() {
+  formSession += 1
   Object.assign(form, { id: null, name: '', price: 0, category_id: categories.value[0]?.id || null, image: '', description: '', status: 1 })
   dialogVisible.value = true
 }
 function openEdit(d) {
+  formSession += 1
   Object.assign(form, { id: d.id, name: d.name, price: d.price, category_id: d.category_id, image: d.image, description: d.description, status: d.status })
   dialogVisible.value = true
+}
+function closeDialog() {
+  if (formBusy.value) return
+  formSession += 1
+  dialogVisible.value = false
+}
+function beforeDialogClose(done) {
+  if (!formBusy.value) {
+    formSession += 1
+    done()
+  }
 }
 async function onUpload(req) {
   const file = req.file
@@ -136,168 +205,106 @@ async function onUpload(req) {
     ElMessage.error('图片大小不能超过 2MB')
     return
   }
-  if (!file.type.startsWith('image/')) {
-    ElMessage.error('仅支持图片格式')
+  if (!['image/jpeg', 'image/png'].includes(file.type)) {
+    ElMessage.error('仅支持 jpg/png 图片')
     return
   }
+  const session = formSession
   uploading.value = true
   try {
     const fd = new FormData()
     fd.append('file', file)
     const data = await uploadImage(fd)
+    if (session !== formSession || !dialogVisible.value) return
     form.image = data.url
+    req.onSuccess?.(data)
     ElMessage.success('上传成功')
-  } catch { /* */ }
-  finally { uploading.value = false }
+  } catch (error) {
+    req.onError?.(error)
+  }
+  finally {
+    if (session === formSession) uploading.value = false
+  }
 }
 async function onSave() {
-  if (!form.name || !form.category_id) return ElMessage.warning('请填写菜名与分类')
+  if (formBusy.value) return
+  const name = form.name.trim()
+  if (!name || !form.category_id) return ElMessage.warning('请填写菜名与分类')
+  form.name = name
   saving.value = true
   try {
-    const payload = { name: form.name, price: form.price, category_id: form.category_id, image: form.image, description: form.description, status: form.status }
+    const payload = { name, price: form.price, category_id: form.category_id, image: form.image, description: form.description?.trim() || '', status: form.status }
     if (form.id) await updateDish(form.id, payload)
     else await createDish(payload)
     ElMessage.success('已保存')
+    formSession += 1
     dialogVisible.value = false
-    load()
+    await load()
+  } catch {
   } finally {
     saving.value = false
   }
 }
 async function onToggle(d) {
-  if (d._toggling) return
-  d._toggling = true
+  if (togglingId.value !== null || deletingId.value !== null) return
+  togglingId.value = d.id
   try {
-    const res = await toggleDish(d.id)
-    d.status = res.status
-    ElMessage.success('状态已更新')
-  } catch { /* */ }
-  finally { d._toggling = false }
+    const data = await toggleDish(d.id)
+    if (data?.status != null) d.status = Number(data.status)
+    else await load()
+  } catch {
+  }
+  finally { togglingId.value = null }
 }
 async function onDelete(d) {
-  if (deleting.value) return
+  if (deletingId.value !== null) return
   try {
     await ElMessageBox.confirm(`确认删除「${d.name}」？`, '提示', { type: 'warning' })
   } catch {
     return
   }
-  deleting.value = true
+  deletingId.value = d.id
   try {
     await deleteDish(d.id)
     ElMessage.success('已删除')
-    load()
-  } catch { /* */ }
-  finally { deleting.value = false }
+    await load()
+  } catch {
+  }
+  finally { deletingId.value = null }
 }
 
 onMounted(async () => {
   try {
     categories.value = await listCategories()
-  } catch (e) {
-    // 错误已在 request.js 统一提示
+  } catch {
   }
-  load()
+  await load()
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(keywordTimer)
 })
 </script>
 
 <style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-}
-
-.filters {
-  display: flex;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-.card-col {
-  margin-bottom: var(--space-lg);
-}
-
-.dish-card {
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  transition: all var(--duration-normal) var(--ease-out);
-}
-
-.dish-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg) !important;
-}
-
-.thumb {
-  height: 150px;
-  background: linear-gradient(135deg, #f5f0ea, #ebe4da) center/cover no-repeat;
-  position: relative;
-}
-
-.off-tag {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  color: #fff;
-  font-size: var(--font-size-xs);
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  letter-spacing: 0.5px;
-}
-
-.info {
-  padding: var(--space-sm) var(--space-md) var(--space-md);
-}
-
-.name {
-  font-weight: var(--font-weight-semibold);
-  font-size: var(--font-size-md);
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
-.meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: var(--space-xs) 0;
-}
-
-.price {
-  color: var(--brand);
-  font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-md);
-}
-
-.cat {
-  color: var(--text-muted);
-  font-size: var(--font-size-xs);
-  background: #faf9f7;
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-light);
-}
-
-.desc {
-  color: var(--text-muted);
-  font-size: var(--font-size-xs);
-  height: 18px;
-  overflow: hidden;
-  line-height: 18px;
-}
-
-.actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border-light);
-}
+.page-panel { background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: var(--radius-lg); padding: var(--space-xl); max-width: 1440px; margin: 0 auto; }
+.page-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-md); }
+.page-head h1 { margin: 0 0 4px; font-size: var(--font-size-xl); }
+.page-head p { margin: 0; color: var(--text-muted); font-size: var(--font-size-sm); }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); padding: var(--space-lg) 0 var(--space-md); margin-top: var(--space-lg); border-top: 1px solid var(--border-light); }
+.filters { display: flex; gap: var(--space-xs); flex-wrap: wrap; }
+.filters .el-input { width: 220px; }
+.filters .el-select { width: 160px; }
+.result-count { color: var(--text-muted); font-size: var(--font-size-sm); white-space: nowrap; }
+.table-scroll { overflow-x: auto; }
+.dish-table { min-width: 880px; }
+.dish-cell { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+.thumb { width: 56px; height: 56px; flex: 0 0 auto; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-subtle); display: flex; align-items: center; justify-content: center; color: var(--text-placeholder); font-size: 10px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.dish-copy { min-width: 0; }
+.dish-copy strong { display: block; font-size: var(--font-size-base); margin-bottom: 4px; }
+.dish-copy span { display: block; max-width: 300px; color: var(--text-muted); font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.price { color: var(--brand); font-weight: var(--font-weight-semibold); }
 
 .action-btns {
   display: flex;
@@ -342,7 +349,16 @@ onMounted(async () => {
 .pager {
   justify-content: flex-end;
   display: flex;
-  margin-top: var(--space-sm);
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.row-index {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .dialog-form {
@@ -353,5 +369,15 @@ onMounted(async () => {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-xs);
+}
+@media (max-width: 680px) {
+  .page-panel { padding: var(--space-md) var(--space-sm); }
+  .page-head { align-items: flex-start; }
+  .page-head p, .result-count { display: none; }
+  .toolbar { align-items: stretch; }
+  .filters { width: 100%; }
+  .filters .el-input { width: 100%; }
+  .filters .el-select { flex: 1; min-width: 140px; }
+  .pager { justify-content: flex-start; overflow-x: auto; }
 }
 </style>

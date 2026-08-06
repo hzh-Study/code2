@@ -1,8 +1,9 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import router from '@/router'
 
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_BASE || '/api',
   timeout: 15000,
 })
 
@@ -30,7 +31,8 @@ request.interceptors.response.use(
       localStorage.removeItem('admin_token')
       localStorage.removeItem('admin_username')
       ElMessage.warning('登录已过期，请重新登录')
-      setTimeout(() => { window.location.hash = '#/login' }, 300)
+      router.replace({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+      return Promise.reject(new Error('未登录或登录已过期'))
     } else {
       ElMessage.error(error.response?.data?.msg || '网络错误')
     }

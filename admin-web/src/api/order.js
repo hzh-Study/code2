@@ -9,7 +9,7 @@ export function orderDetail(id) {
 }
 
 export function completeOrder(id) {
-  return request.post(`/v1/admin/orders/${id}/status`, { status: 3 })
+  return request.post(`/v1/admin/orders/${id}/status`)
 }
 
 export function dashboard() {

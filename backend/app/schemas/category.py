@@ -1,7 +1,9 @@
 """分类相关 schema。"""
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+CategoryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
 
 
 class CategoryOut(BaseModel):
@@ -13,10 +15,10 @@ class CategoryOut(BaseModel):
 
 
 class CategoryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    sort_order: int = 0
+    name: CategoryName
+    sort_order: int = Field(default=0, ge=0)
 
 
 class CategoryUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=64)
-    sort_order: Optional[int] = None
+    name: Optional[CategoryName] = None
+    sort_order: Optional[int] = Field(default=None, ge=0)

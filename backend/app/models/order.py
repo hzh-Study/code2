@@ -3,6 +3,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base, BigIntCol, BigIntPK, Money
+from app.utils.time import utc_now
 
 
 class Order(Base):
@@ -19,6 +20,6 @@ class Order(Base):
     pay_status: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="0=未付,1=已付")
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expire_at: Mapped[object] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[object] = mapped_column(DateTime, default=utc_now, server_default=func.now())
     paid_at: Mapped[object] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[object] = mapped_column(DateTime, nullable=True, onupdate=func.now())
+    updated_at: Mapped[object] = mapped_column(DateTime, nullable=True, onupdate=utc_now)

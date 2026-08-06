@@ -1,10 +1,12 @@
 {
   "pages": [
+    { "path": "pages/home/home", "style": { "navigationBarTitleText": "拾味堂", "navigationBarBackgroundColor": "#2B2B2B", "navigationBarTextStyle": "white" } },
     { "path": "pages/index/index", "style": { "navigationBarTitleText": "点餐", "navigationBarBackgroundColor": "#E85D2C", "navigationBarTextStyle": "white" } },
     { "path": "pages/cart/cart", "style": { "navigationBarTitleText": "购物车" } },
     { "path": "pages/order/order", "style": { "navigationBarTitleText": "确认订单" } },
     { "path": "pages/orders/orders", "style": { "navigationBarTitleText": "我的订单" } },
-    { "path": "pages/orders/detail", "style": { "navigationBarTitleText": "订单详情" } }
+    { "path": "pages/orders/detail", "style": { "navigationBarTitleText": "订单详情" } },
+    { "path": "pages/profile/profile", "style": { "navigationBarTitleText": "个人中心" } }
   ],
   "tabBar": {
     "color": "#888888",
@@ -12,9 +14,11 @@
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
+      { "pagePath": "pages/home/home", "text": "首页" },
       { "pagePath": "pages/index/index", "text": "点餐" },
       { "pagePath": "pages/cart/cart", "text": "购物车" },
-      { "pagePath": "pages/orders/orders", "text": "我的订单" }
+      { "pagePath": "pages/orders/orders", "text": "订单" },
+      { "pagePath": "pages/profile/profile", "text": "我的" }
     ]
   },
   "globalStyle": {

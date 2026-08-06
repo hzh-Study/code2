@@ -1,37 +1,36 @@
 <template>
   <view class="page">
-    <view class="tabs">
-      <view
-        v-for="t in tabs"
-        :key="t.value"
-        class="tab"
-        :class="{ active: active === t.value }"
-        @click="switchTab(t.value)"
-      >
-        <text class="tab-label">{{ t.label }}</text>
-        <view v-if="active === t.value" class="tab-indicator"></view>
+    <scroll-view class="tabs" scroll-x>
+      <view class="tabs-inner">
+        <view v-for="tab in tabs" :key="String(tab.value)" class="tab" :class="{ active: active === tab.value }" role="tab" tabindex="0" :aria-selected="active === tab.value" @click="switchTab(tab.value)" @keydown.enter="switchTab(tab.value)">{{ tab.label }}</view>
       </view>
-    </view>
+    </scroll-view>
 
-    <view v-if="!orders.length" class="empty">
-      <view class="empty-icon">📋</view>
-      <view class="empty-text">暂无订单</view>
-      <view class="empty-hint">下单后会在这里展示哦</view>
-    </view>
+    <UiState v-if="loading" type="loading" title="正在读取订单" />
+    <UiState v-else-if="error" type="error" title="订单加载失败" description="请检查网络后重新尝试" action-text="重新加载" @action="retry" />
+    <UiState v-else-if="!orders.length" :title="`暂无${activeLabel}订单`" description="完成点餐后，订单进度会展示在这里" action-text="去点餐" @action="goOrdering" />
 
-    <view v-for="o in orders" :key="o.id" class="order-card" @click="goDetail(o.id)">
-      <view class="oc-head">
-        <text class="oc-no">订单号 {{ o.order_no }}</text>
-        <view class="oc-status-wrap" :class="'s' + o.status">
-          <text class="oc-status">{{ statusLabel(o.status) }}</text>
+    <view v-else class="order-list">
+      <view v-for="order in orders" :key="order.id" class="order-card" role="button" tabindex="0" :aria-label="`查看订单${order.order_no}`" @click="goDetail(order.id)" @keydown.enter="goDetail(order.id)">
+        <view class="order-head">
+          <view><view class="order-no">{{ order.order_no }}</view><view class="order-time">{{ order.created_at }}</view></view>
+          <view class="status-badge" :class="`status-${order.status}`">{{ statusLabel(order.status) }}</view>
         </view>
-      </view>
-      <view class="oc-detail" v-if="o.detail">{{ o.detail }}</view>
-      <view class="oc-foot">
-        <text class="oc-amount">¥{{ Number(o.total_amount || 0).toFixed(2) }}</text>
-        <view class="oc-actions" @click.stop>
-          <text v-if="o.status === 1" class="act pay" @click="pay(o)">去支付</text>
-          <text v-if="o.status === 1" class="act cancel" @click="cancel(o)">取消</text>
+        <view class="order-content">
+          <image v-if="order.thumbnail" class="thumbnail" :src="imgUrl(order.thumbnail)" mode="aspectFill" />
+          <view v-else class="thumbnail no-image">拾味堂</view>
+          <view class="order-summary">
+            <view class="detail">{{ order.detail || '订单商品' }}</view>
+            <view class="meta"><text>{{ diningLabel(order.dining_mode) }}</text><text>{{ itemCount(order) }} 件商品</text></view>
+          </view>
+        </view>
+        <view class="order-foot">
+          <view class="total-label">订单金额 <text>¥{{ money(order.total_amount) }}</text></view>
+          <view v-if="order.status === 1" class="actions" @click.stop>
+            <view class="action secondary" :class="{ disabled: operatingId === order.id }" role="button" tabindex="0" :aria-disabled="operatingId === order.id" @click="cancel(order)" @keydown.enter.stop="cancel(order)">取消订单</view>
+            <view class="action primary" :class="{ disabled: operatingId === order.id }" role="button" tabindex="0" :aria-disabled="operatingId === order.id" aria-live="polite" @click="pay(order)" @keydown.enter.stop="pay(order)">{{ operatingId === order.id ? '处理中…' : '去支付' }}</view>
+          </view>
+          <view v-else class="detail-link">查看详情 <text>›</text></view>
         </view>
       </view>
     </view>
@@ -39,165 +38,160 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import { cancelOrder, getOrders, repayOrder } from '../../api'
+import { imgUrl } from '../../config'
 import { loginIfNeeded } from '../../store/user'
-import { getOrders, repayOrder, simulatePay, cancelOrder } from '../../api'
+import { payWithParams } from '../../utils/payment'
+import UiState from '../../components/UiState.vue'
 
 const tabs = [
   { label: '全部', value: null },
   { label: '待支付', value: 1 },
   { label: '待出餐', value: 2 },
-  { label: '已完成', value: 3 }
+  { label: '已完成', value: 3 },
+  { label: '已取消', value: 4 }
 ]
 const active = ref(null)
 const orders = ref([])
-
-function statusLabel(s) {
-  return { 1: '待支付', 2: '待出餐', 3: '已完成', 4: '已取消' }[s] || ''
-}
+const loading = ref(true)
+const operatingId = ref(null)
+const error = ref(false)
 let loadSeq = 0
+
+const activeLabel = computed(() => {
+  const label = tabs.find((tab) => tab.value === active.value)?.label
+  return label === '全部' ? '' : (label || '')
+})
+
+function money(value) {
+  return Number(value || 0).toFixed(2)
+}
+
+function statusLabel(status) {
+  return { 1: '待支付', 2: '待出餐', 3: '已完成', 4: '已取消' }[status] || '未知状态'
+}
+
+function diningLabel(mode) {
+  return { 1: '堂食', 2: '打包带走' }[mode] || '未知'
+}
+
+function itemCount(order) {
+  return order.item_count || 0
+}
+
 async function load() {
   const seq = ++loadSeq
+  loading.value = true
+  error.value = false
   try {
     const data = await getOrders(active.value)
-    if (seq !== loadSeq) return
-    orders.value = data
-  } catch (e) {}
+    if (seq === loadSeq) orders.value = data || []
+  } catch (requestError) {
+    if (seq === loadSeq) error.value = true
+  } finally {
+    if (seq === loadSeq) loading.value = false
+  }
 }
-function switchTab(v) {
-  active.value = v
+
+async function retry() {
+  await loginIfNeeded().catch(() => undefined)
+  await load()
+}
+
+function switchTab(value) {
+  if (active.value === value) return
+  active.value = value
   load()
 }
+
 function goDetail(id) {
   uni.navigateTo({ url: `/pages/orders/detail?id=${id}` })
 }
-async function pay(o) {
-  try {
-    const res = await repayOrder(o.id)
-    if (!res || !res.pay_params) {
-      uni.showToast({ title: '支付参数异常', icon: 'none' })
-      return
-    }
-    if (res.pay_params.dev) {
-      try {
-        await simulatePay(res.order_no)
-        uni.showToast({ title: '支付成功', icon: 'success' })
-      } catch (e) {
-        uni.showToast({ title: '支付失败', icon: 'none' })
-      }
-      load()
-    } else {
-      uni.requestPayment({
-        ...res.pay_params,
-        success: () => { uni.showToast({ title: '支付成功', icon: 'success' }); load() },
-        fail: () => uni.showToast({ title: '支付未完成', icon: 'none' })
-      })
-    }
-  } catch (e) {}
+
+function goOrdering() {
+  uni.switchTab({ url: '/pages/index/index' })
 }
-async function cancel(o) {
-  const ok = await new Promise((r) => uni.showModal({
-    title: '确认取消',
-    content: `取消订单 ${o.order_no}？`,
-    success: (res) => r(res.confirm)
-  }))
-  if (!ok) return
+
+async function pay(order) {
+  if (operatingId.value) return
+  operatingId.value = order.id
   try {
-    await cancelOrder(o.id)
-    uni.showToast({ title: '已取消', icon: 'none' })
-    load()
-  } catch (e) {}
+    const result = await repayOrder(order.id)
+    const outcome = await payWithParams({
+      orderId: order.id,
+      orderNo: result?.order_no || order.order_no,
+      payParams: result?.pay_params,
+      onPaid: load
+    })
+    if (outcome === 'missing') {
+      uni.showToast({ title: '支付参数异常', icon: 'none' })
+    }
+  } catch {
+    // request.js 已 toast
+  } finally {
+    operatingId.value = null
+  }
+}
+
+async function cancel(order) {
+  if (operatingId.value) return
+  const confirmed = await new Promise((resolve) => uni.showModal({
+    title: '取消订单',
+    content: `确定取消订单 ${order.order_no} 吗？`,
+    confirmText: '取消订单',
+    confirmColor: '#b42318',
+    success: (result) => resolve(result.confirm),
+    fail: () => resolve(false)
+  }))
+  if (!confirmed) return
+  operatingId.value = order.id
+  try {
+    await cancelOrder(order.id)
+    uni.showToast({ title: '订单已取消', icon: 'none' })
+    await load()
+  } finally {
+    operatingId.value = null
+  }
 }
 
 onShow(async () => {
   try {
     await loginIfNeeded()
+    await load()
   } catch (e) {
-    uni.showToast({ title: '登录失败，请重试', icon: 'none' })
-    return
+    error.value = true
   }
-  await load()
 })
 </script>
 
 <style scoped>
-.page { padding-bottom: var(--sp-20); min-height: 100vh; background: var(--c-bg); }
-
-/* ── 顶部选项卡 ── */
-.tabs {
-  display: flex; background: var(--c-bg-card);
-  padding: var(--sp-12) 0;
-  position: sticky; top: 0; z-index: 10;
-  box-shadow: var(--shadow-sm);
-}
-.tab {
-  flex: 1; text-align: center;
-  padding: var(--sp-8) 0;
-  display: flex; flex-direction: column; align-items: center;
-  position: relative;
-}
-.tab-label { font-size: var(--font-base); color: var(--c-text-secondary); transition: all .25s var(--ease); }
-.tab.active .tab-label { color: var(--c-primary); font-weight: 700; }
-.tab-indicator {
-  width: 20px; height: 3px; border-radius: var(--r-full);
-  background: var(--c-primary); margin-top: var(--sp-4);
-}
-
-/* ── 空状态 ── */
-.empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding-top: 160px;
-}
-.empty-icon { font-size: 48px; opacity: .6; margin-bottom: var(--sp-16); }
-.empty-text { font-size: var(--font-lg); font-weight: 700; color: var(--c-text-secondary); }
-.empty-hint { font-size: var(--font-sm); color: var(--c-text-placeholder); margin-top: var(--sp-8); }
-
-/* ── 订单卡片 ── */
-.order-card {
-  background: var(--c-bg-card);
-  border-radius: var(--r-lg);
-  padding: var(--sp-16) var(--sp-20);
-  margin: var(--sp-10) var(--sp-12);
-  box-shadow: var(--shadow-sm);
-  transition: transform .2s var(--ease);
-}
-.order-card:active { transform: scale(.98); }
-.oc-head { display: flex; justify-content: space-between; align-items: center; }
-.oc-no { font-size: var(--font-sm); color: var(--c-text-secondary); }
-.oc-status-wrap {
-  padding: var(--sp-4) var(--sp-10);
-  border-radius: var(--r-full);
-  font-size: var(--font-xs); font-weight: 600;
-}
-.oc-status { font-size: var(--font-xs); font-weight: 700; }
-
-/* 状态颜色胶囊 */
-.s1 { background: var(--c-accent-bg); }
-.s1 .oc-status { color: var(--c-warning); }
-.s2 { background: var(--c-primary-bg); }
-.s2 .oc-status { color: var(--c-primary); }
-.s3 { background: #e8f5e9; }
-.s3 .oc-status { color: var(--c-success); }
-.s4 { background: #f5f5f5; }
-.s4 .oc-status { color: var(--c-text-placeholder); }
-
-.oc-detail {
-  color: var(--c-text-secondary); font-size: var(--font-sm);
-  margin: var(--sp-10) 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.oc-foot { display: flex; justify-content: space-between; align-items: center; }
-.oc-amount { color: var(--c-primary); font-weight: 800; font-size: var(--font-md); }
-.oc-actions { display: flex; gap: var(--sp-10); }
-.act {
-  font-size: var(--font-sm); padding: var(--sp-8) var(--sp-16); border-radius: var(--r-full);
-  transition: transform .15s var(--ease);
-}
-.act:active { transform: scale(.92); }
-.pay {
-  background: var(--c-primary); color: var(--c-text-inverse);
-  box-shadow: 0 2px 8px rgba(232,93,44,.3);
-}
-.cancel { border: 1px solid var(--c-border); color: var(--c-text-secondary); }
+.page { min-height: 100vh; background: var(--c-bg); }
+.tabs { position: sticky; top: 0; z-index: 10; width: 100%; white-space: nowrap; background: var(--c-bg-card); border-bottom: 1px solid var(--c-border-light); }
+.tabs-inner { min-width: 100%; height: 54px; display: inline-flex; padding: 0 6px; box-sizing: border-box; }
+.tab { position: relative; min-width: 72px; height: 54px; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; color: var(--c-text-secondary); font-size: var(--font-sm); }
+.tab.active { color: var(--c-primary); font-weight: 800; }
+.tab.active::after { content: ''; position: absolute; right: 18px; bottom: 0; left: 18px; height: 3px; border-radius: 2px 2px 0 0; background: var(--c-primary); }
+.order-list { padding: 10px 12px 20px; }
+.order-card { margin-bottom: 10px; padding: 16px; border: 1px solid var(--c-border-light); border-radius: var(--r-lg); background: var(--c-bg-card); }
+.order-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.order-no { color: var(--c-text); font-size: var(--font-sm); font-weight: 700; }
+.order-time { margin-top: 4px; color: var(--c-text-placeholder); font-size: 10px; }
+.order-content { margin-top: 14px; display: flex; gap: 12px; }
+.thumbnail { width: 68px; height: 68px; flex-shrink: 0; border-radius: var(--r-md); background: var(--c-bg-soft); }
+.no-image { display: flex; align-items: center; justify-content: center; color: var(--c-text-placeholder); font-size: 10px; }
+.order-summary { min-width: 0; flex: 1; }
+.detail { min-height: 40px; overflow: hidden; color: var(--c-text); display: -webkit-box; font-size: var(--font-sm); line-height: 20px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.meta { margin-top: 6px; display: flex; gap: 12px; color: var(--c-text-placeholder); font-size: 10px; }
+.order-foot { min-height: 50px; margin-top: 14px; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--c-border-light); }
+.total-label { color: var(--c-text-secondary); font-size: var(--font-xs); }
+.total-label text { margin-left: 4px; color: var(--c-text); font-size: var(--font-md); font-weight: 800; }
+.actions { display: flex; gap: 8px; }
+.action { min-width: 86px; height: 44px; padding: 0 10px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); font-size: var(--font-xs); font-weight: 700; }
+.action.secondary { border: 1px solid var(--c-border); color: var(--c-text-secondary); }
+.action.primary { background: var(--c-primary); color: #fff; }
+.detail-link { min-width: 88px; height: 44px; display: flex; align-items: center; justify-content: flex-end; color: var(--c-text-secondary); font-size: var(--font-xs); }
+.detail-link text { margin-left: 5px; font-size: 20px; }
+.tab:active, .order-card:active, .action:active { opacity: .72; }
 </style>

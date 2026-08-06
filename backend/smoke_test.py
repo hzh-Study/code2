@@ -1,13 +1,16 @@
 """全链路接口冒烟测试（需先启动后端 http://127.0.0.1:8000）。"""
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import httpx
 
 from app.database import SessionLocal
 from app.models.order import Order
+from app.utils.time import LOCAL_TIMEZONE, utc_now
 
 BASE = "http://127.0.0.1:8000/api/v1"
+BASE_IMG = datetime.now().strftime("/static/dishes/%Y/%m")
 ok_count = 0
 fail = []
 
@@ -38,6 +41,12 @@ with httpx.Client(timeout=30) as c:
     d = j(c.post(f"{BASE}/admin/auth/login", json={"username": "admin", "password": "wrong"}))
     check("后台登录-错误密码拦截", d.get("code") != 0, d)
 
+    repeated_logins = [
+        j(c.post(f"{BASE}/admin/auth/login", json={"username": "admin", "password": "admin123"}))
+        for _ in range(6)
+    ]
+    check("后台连续成功登录不触发失败限流", all(item.get("code") == 0 for item in repeated_logins), repeated_logins)
+
     r = c.get(f"{BASE}/admin/categories")
     check("后台接口未授权拦截", r.status_code in (401, 403), r.status_code)
 
@@ -61,22 +70,29 @@ with httpx.Client(timeout=30) as c:
     d = j(c.post(f"{BASE}/admin/categories", headers=AH, json={"name": "冒烟分类", "sort_order": 99}))
     check("后台新增分类", d.get("code") == 0, d)
     tmp_cat = d["data"]["id"]
+    d = j(c.post(f"{BASE}/admin/categories", headers=AH, json={"name": "冒烟分类", "sort_order": 100}))
+    check("后台分类重名被拦截", d.get("code") != 0, d)
+    d = j(c.post(f"{BASE}/admin/categories", headers=AH, json={"name": "   ", "sort_order": 100}))
+    check("后台纯空白分类名被拦截", d.get("code") != 0, d)
     d = j(c.put(f"{BASE}/admin/categories/{tmp_cat}", headers=AH, json={"name": "冒烟分类改", "sort_order": 98}))
     check("后台编辑分类", d.get("code") == 0, d)
 
     # 菜品增改上下架
     d = j(c.post(f"{BASE}/admin/dishes", headers=AH, json={
         "name": "冒烟测试菜", "price": 9.9, "description": "test",
-        "image": "/static/dishes/2026/07/tang.png", "category_id": tmp_cat, "status": 1}))
+        "image": f"{BASE_IMG}/tang.png", "category_id": tmp_cat, "status": 1}))
     check("后台新增菜品", d.get("code") == 0, d)
     tmp_dish = d["data"]["id"]
+    d = j(c.post(f"{BASE}/admin/dishes", headers=AH, json={
+        "name": "零元菜", "price": 0, "category_id": tmp_cat, "status": 1}))
+    check("后台零元菜品被拦截", d.get("code") != 0, d)
 
     d = j(c.delete(f"{BASE}/admin/categories/{tmp_cat}", headers=AH))
     check("含菜品的分类禁止删除", d.get("code") != 0, d)
 
     d = j(c.put(f"{BASE}/admin/dishes/{tmp_dish}", headers=AH, json={
         "name": "冒烟测试菜2", "price": 11.5, "description": "test2",
-        "image": "/static/dishes/2026/07/tang.png", "category_id": tmp_cat, "status": 1}))
+        "image": f"{BASE_IMG}/tang.png", "category_id": tmp_cat, "status": 1}))
     check("后台编辑菜品", d.get("code") == 0, d)
 
     d = j(c.post(f"{BASE}/admin/dishes/{tmp_dish}/toggle", headers=AH))
@@ -135,6 +151,9 @@ with httpx.Client(timeout=30) as c:
     order_id = d["data"]["id"]
     order_no = d["data"]["order_no"]
     check("订单初始为待支付", d["data"]["status"] == 1, d["data"])
+    created_local = datetime.strptime(d["data"]["created_at"], "%Y-%m-%d %H:%M:%S")
+    now_local = datetime.now(LOCAL_TIMEZONE).replace(tzinfo=None)
+    check("订单创建时间按门店时区展示", abs((now_local - created_local).total_seconds()) < 120, d["data"]["created_at"])
     expected = float(dish1["price"]) * 2
     check("订单金额正确", abs(float(d["data"]["total_amount"]) - expected) < 0.01,
           f"{d['data']['total_amount']} vs {expected}")
@@ -154,6 +173,8 @@ with httpx.Client(timeout=30) as c:
     check("支付回调成功", d.get("code") == 0, d)
     d = j(c.post(f"{BASE}/client/pay/notify", json={"order_no": order_no}))
     check("支付回调幂等", d.get("code") == 0, d)
+    d = j(c.post(f"{BASE}/client/pay/notify", json={}))
+    check("无效支付回调被拒绝", d.get("code") != 0, d)
 
     d = j(c.get(f"{BASE}/client/orders/{order_id}", headers=UH))
     check("支付后状态=待出餐", d["data"]["status"] == 2 and d["data"]["pay_status"] == 1, d["data"])
@@ -187,11 +208,14 @@ with httpx.Client(timeout=30) as c:
     d = j(c.get(f"{BASE}/admin/dashboard", headers=AH))
     check("数据看板统计", d.get("code") == 0 and "today_orders" in d["data"]
           and "today_sales" in d["data"] and "recent_orders" in d["data"], d)
+    check("看板返回全量状态统计", all(key in d["data"].get("status_counts", {})
+          for key in ("pending_pay", "pending_meal", "completed", "cancelled")), d)
+    check("看板近期订单包含数字状态", all("status" in item for item in d["data"]["recent_orders"]), d)
 
     # 取消未支付订单 + 打包单
     c.post(f"{BASE}/client/cart/add", headers=UH, json={"dish_id": dish1["id"], "quantity": 1})
-    d = j(c.post(f"{BASE}/client/orders", headers=UH, json={"dining_mode": 2, "address": "XX路1号"}))
-    check("创建订单(打包)", d.get("code") == 0 and d["data"]["dining_mode"] == 2, d)
+    d = j(c.post(f"{BASE}/client/orders", headers=UH, json={"dining_mode": 2}))
+    check("创建订单(打包无需地址)", d.get("code") == 0 and d["data"]["dining_mode"] == 2, d)
     oid2 = d["data"]["id"]
     d = j(c.post(f"{BASE}/client/orders/{oid2}/cancel", headers=UH))
     check("用户取消待支付订单", d.get("code") == 0, d)
@@ -209,7 +233,7 @@ with httpx.Client(timeout=30) as c:
     check("过期检查-创建订单(repay)", d.get("code") == 0 and d["data"].get("order_no"), d)
     exp_oid = d["data"]["id"]
     db = SessionLocal()
-    db.query(Order).filter(Order.id == exp_oid).update({"expire_at": datetime.now() - timedelta(minutes=10)})
+    db.query(Order).filter(Order.id == exp_oid).update({"expire_at": utc_now() - timedelta(minutes=10)})
     db.commit()
     db.close()
     r = c.post(f"{BASE}/client/orders/{exp_oid}/repay", headers=UH)
@@ -223,13 +247,42 @@ with httpx.Client(timeout=30) as c:
     check("过期检查-创建订单(prepay)", d.get("code") == 0 and d["data"].get("order_no"), d)
     exp_oid2 = d["data"]["id"]
     db = SessionLocal()
-    db.query(Order).filter(Order.id == exp_oid2).update({"expire_at": datetime.now() - timedelta(minutes=10)})
+    db.query(Order).filter(Order.id == exp_oid2).update({"expire_at": utc_now() - timedelta(minutes=10)})
     db.commit()
     db.close()
     d = j(c.post(f"{BASE}/client/pay/prepay", headers=UH, json={"order_id": exp_oid2}))
     check("过期订单 prepay 返回失败(2002)", d.get("code") == 2002, d)
     d = j(c.get(f"{BASE}/client/orders/{exp_oid2}", headers=UH))
     check("过期 prepay 后订单状态=已取消", d.get("code") == 0 and d["data"]["status"] == 4, d)
+
+    # 并发加购必须原子累加；并发结算只能消费购物车一次。
+    c.post(f"{BASE}/client/cart/clear", headers=UH)
+
+    def add_once():
+        with httpx.Client(timeout=30) as thread_client:
+            return j(thread_client.post(
+                f"{BASE}/client/cart/add", headers=UH,
+                json={"dish_id": dish1["id"], "quantity": 1},
+            ))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        add_results = list(executor.map(lambda _: add_once(), range(2)))
+    d = j(c.get(f"{BASE}/client/cart", headers=UH))
+    concurrent_items = d["data"] if isinstance(d["data"], list) else d["data"]["items"]
+    concurrent_quantity = next((item["quantity"] for item in concurrent_items if item["dish_id"] == dish1["id"]), 0)
+    check("并发加购数量不丢失", all(item.get("code") == 0 for item in add_results) and concurrent_quantity == 2,
+          {"results": add_results, "quantity": concurrent_quantity})
+
+    def checkout_once():
+        with httpx.Client(timeout=30) as thread_client:
+            return j(thread_client.post(
+                f"{BASE}/client/orders", headers=UH, json={"dining_mode": 1},
+            ))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        checkout_results = list(executor.map(lambda _: checkout_once(), range(2)))
+    successful_checkouts = [item for item in checkout_results if item.get("code") == 0]
+    check("并发结算只生成一笔订单", len(successful_checkouts) == 1, checkout_results)
 
     # 清理
     c.post(f"{BASE}/admin/dishes/{tmp_dish}/toggle", headers=AH)
