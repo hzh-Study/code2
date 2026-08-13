@@ -41,7 +41,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { cancelOrder, getOrderDetail, repayOrder } from '../../api'
 import { loginIfNeeded } from '../../store/user'
 import { payWithParams } from '../../utils/payment'
@@ -128,11 +128,12 @@ async function cancel() {
   }
 }
 
+let backTimer = null
 onLoad(async (options) => {
   orderId = options?.id
   if (!orderId) {
     uni.showToast({ title: '订单参数错误', icon: 'none' })
-    setTimeout(() => uni.navigateBack(), 800)
+    backTimer = setTimeout(() => uni.navigateBack(), 800)
     return
   }
   try {
@@ -143,6 +144,10 @@ onLoad(async (options) => {
   } finally {
     loading.value = false
   }
+})
+
+onUnload(() => {
+  if (backTimer) clearTimeout(backTimer)
 })
 </script>
 

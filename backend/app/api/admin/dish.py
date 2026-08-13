@@ -1,4 +1,6 @@
 """管理后台：菜品管理（含下架，支持分页/筛选）。"""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,8 @@ from app.models.dish import Dish
 from app.models.order_item import OrderItem
 from app.schemas.common import R
 from app.schemas.dish import DishCreate, DishUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -127,5 +131,10 @@ def toggle_dish(
     if not dish:
         return R.fail(3004, "菜品不存在")
     dish.status = 0 if dish.status == 1 else 1
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        logger.exception("菜品状态切换失败: dish_id=%s", dish_id)
+        db.rollback()
+        return R.fail(3006, "操作失败，请重试")
     return R.ok({"id": dish.id, "status": dish.status})

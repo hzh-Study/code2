@@ -50,7 +50,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onUnload } from '@dcloudio/uni-app'
 import { createOrder } from '../../api'
 import cartState, { loadCart } from '../../store/cart'
 import { loginIfNeeded } from '../../store/user'
@@ -69,8 +69,18 @@ function money(value) {
   return Number(value || 0).toFixed(2)
 }
 
+let goOrdersTimer = null
+onUnload(() => {
+  if (goOrdersTimer) clearTimeout(goOrdersTimer)
+})
+
 function goOrders() {
-  setTimeout(() => uni.switchTab({ url: '/pages/orders/orders' }), 700)
+  // 使用短延迟让 toast 可见，同时保持 submitting 状态防止重复操作
+  if (goOrdersTimer) clearTimeout(goOrdersTimer)
+  goOrdersTimer = setTimeout(() => {
+    submitting.value = false
+    uni.switchTab({ url: '/pages/orders/orders' })
+  }, 700)
 }
 
 async function submit() {
@@ -98,6 +108,8 @@ async function submit() {
       uni.showToast({ title: '订单已创建，请到订单列表完成支付', icon: 'none' })
     }
     goOrders()
+    // 注意：submitting 在 goOrders 定时器中重置，避免导航前用户重复操作
+    return
   } catch {
     // request.js 已 toast 具体错误
   } finally {

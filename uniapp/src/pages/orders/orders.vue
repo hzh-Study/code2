@@ -151,6 +151,8 @@ async function cancel(order) {
     await cancelOrder(order.id)
     uni.showToast({ title: '订单已取消', icon: 'none' })
     await load()
+  } catch (e) {
+    uni.showToast({ title: e?.message || '取消失败，请重试', icon: 'none' })
   } finally {
     operatingId.value = null
   }
@@ -161,6 +163,7 @@ onShow(async () => {
     await loginIfNeeded()
     await load()
   } catch (e) {
+    loading.value = false  // 避免登录失败时 loading 永久为 true，导致无限 loading 动画
     error.value = true
   }
 })

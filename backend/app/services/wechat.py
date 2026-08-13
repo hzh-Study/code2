@@ -18,6 +18,7 @@ from app.config import (
     WX_MCH_ID,
     WX_SECRET,
 )
+from app.utils.time import LOCAL_TIMEZONE
 
 SIGN_TYPE = "HMAC-SHA256"
 
@@ -106,7 +107,10 @@ def build_pay_params(order, openid: str) -> dict:
         "sign_type": SIGN_TYPE,
     }
     if getattr(order, "expire_at", None):
-        params["time_expire"] = order.expire_at.strftime("%Y%m%d%H%M%S")
+        # 数据库存储的是无时区的 UTC 时间，微信要求北京时间 (UTC+8)
+        from datetime import timezone as _tz
+        local_expire = order.expire_at.replace(tzinfo=_tz.utc).astimezone(LOCAL_TIMEZONE)
+        params["time_expire"] = local_expire.strftime("%Y%m%d%H%M%S")
     params["sign"] = _sign(params, WX_API_KEY)
 
     response = httpx.post(

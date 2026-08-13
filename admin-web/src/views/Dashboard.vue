@@ -108,8 +108,8 @@ function statusClass(status) {
   return { 1: 'is-neutral', 2: 'is-warning', 3: 'is-success', 4: 'is-muted' }[status] || 'is-neutral'
 }
 
-async function load() {
-  loading.value = true
+async function load(silent = false) {
+  if (!silent) loading.value = true
   error.value = false
   try {
     const data = await dashboard() || {}
@@ -132,7 +132,8 @@ async function load() {
   }
 }
 
-useAutoRefresh(load, 5000)
+// 后台刷新使用 silent 模式，避免已有数据时显示 loading 蒙层
+useAutoRefresh(() => load(true), 5000)
 
 onMounted(() => {
   load()

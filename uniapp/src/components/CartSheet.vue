@@ -59,6 +59,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import cartState, { cartCount, cartTotal, changeCartQuantity, clearAllCart, isCartUpdating, loadCart } from '../store/cart'
+import { onUnmounted } from 'vue'
 import { imgUrl } from '../config'
 import QuantityStepper from './QuantityStepper.vue'
 
@@ -69,17 +70,29 @@ const props = defineProps({
 const emit = defineEmits(['update:visible'])
 
 const rendered = ref(false)
+let closeTimer = null
 
 watch(() => props.visible, async (next) => {
   if (next) {
-    rendered.value = true
+    // 先加载购物车，确认有数据后再渲染，避免空购物车闪现后立即关闭
     await loadCart().catch(() => undefined)
-    if (!cartCount.value) close()
+    if (!cartCount.value) {
+      // 购物车为空，通知父组件关闭，不渲染
+      close()
+      return
+    }
+    rendered.value = true
     return
   }
-  setTimeout(() => {
+  if (closeTimer) clearTimeout(closeTimer)
+  closeTimer = setTimeout(() => {
     if (!props.visible) rendered.value = false
+    closeTimer = null
   }, 320)
+})
+
+onUnmounted(() => {
+  if (closeTimer) clearTimeout(closeTimer)
 })
 
 watch(cartCount, (count) => {

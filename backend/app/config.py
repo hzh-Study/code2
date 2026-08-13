@@ -54,7 +54,8 @@ APP_TIMEZONE = _env("APP_TIMEZONE", "Asia/Shanghai")
 DEFAULT_SECRET_KEY = "change-me-please-use-strong-secret-in-prod"
 SECRET_KEY = _env("SECRET_KEY", DEFAULT_SECRET_KEY)
 
-# 未显式设置时维持开箱即用行为；显式 false 时绝不静默退回模拟登录/支付。
+# 未显式设置时，未配置微信凭证则自动启用开发模式（开箱即用）；
+# 显式 DEV_MODE=false 时绝不静默退回模拟，必须提供完整微信凭证。
 _dev_mode_value = _env("DEV_MODE", "")
 DEV_MODE = _parse_bool("DEV_MODE", _dev_mode_value) if _dev_mode_value.strip() else not (WX_APPID and WX_SECRET)
 

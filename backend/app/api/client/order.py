@@ -1,10 +1,10 @@
 """小程序端：订单。"""
 import logging
+import threading
 from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -32,6 +32,10 @@ from app.utils.time import expire_at, format_utc, is_expired
 
 router = APIRouter()
 
+# SQLite 结算串行化锁：避免原生 BEGIN IMMEDIATE 绕过 SQLAlchemy 事务管理
+_checkout_locks: dict[int, threading.Lock] = {}
+_checkout_locks_guard = threading.Lock()
+
 
 def _gen_order_no() -> str:
     import uuid
@@ -40,11 +44,18 @@ def _gen_order_no() -> str:
 
 def _lock_checkout(db: Session, user_id: int) -> None:
     """串行化同一用户的结算，防止并发请求重复消费一份购物车。"""
-    if db.bind is not None and db.bind.dialect.name == "sqlite":
-        db.execute(text("BEGIN IMMEDIATE"))
-        user_exists = db.query(User.id).filter(User.id == user_id).first()
-    else:
-        user_exists = db.query(User.id).filter(User.id == user_id).with_for_update().first()
+    with _checkout_locks_guard:
+        lock = _checkout_locks.setdefault(user_id, threading.Lock())
+    lock.acquire()
+    try:
+        if db.bind is not None and db.bind.dialect.name == "sqlite":
+            # SQLite：用应用层锁 + 普通查询，不走原生 BEGIN IMMEDIATE
+            user_exists = db.query(User.id).filter(User.id == user_id).first()
+        else:
+            # MySQL：使用 SELECT ... FOR UPDATE 行级锁
+            user_exists = db.query(User.id).filter(User.id == user_id).with_for_update().first()
+    finally:
+        lock.release()
     if user_exists is None:
         raise HTTPException(status_code=401, detail="用户不存在")
 
@@ -148,6 +159,8 @@ def create_order(
     # 主 PRD 约定打包仅标记用餐方式，不强制地址；保留可选字段兼容旧客户端。
     if body.address:
         body.address = body.address.strip()
+        if not body.address:
+            body.address = None
     _lock_checkout(db, user_id)
     cart_query = db.query(Cart).filter(Cart.user_id == user_id)
     if db.bind is not None and db.bind.dialect.name != "sqlite":
@@ -197,6 +210,10 @@ def create_order(
         db.commit()  # 订单 + 订单项 + 清空购物车一次性提交，避免产生无明细的孤儿订单
     except IntegrityError:
         db.rollback()
+    except Exception:
+        logging.exception("订单创建失败（非唯一性冲突）")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="订单创建失败，请重试")
         # 创建全新的 Order 对象，避免复用 rollback 后过期的 ORM 对象
         # 重新构建订单项，校验在售，使用 Decimal 计算小计和总额（与主路径一致）
         retry_order_items = []
@@ -289,6 +306,7 @@ def repay_order(order_id: int, user_id: int = Depends(get_current_user_id), db: 
         raise HTTPException(status_code=400, detail="仅待支付订单可重新支付")
     if is_expired(order.expire_at):
         expire_pending_orders(db, user_id)
+        db.refresh(order)
         if order.status == STATUS_PENDING:
             raise HTTPException(status_code=502, detail="订单关闭失败，请稍后重试")
         raise HTTPException(status_code=400, detail="订单已超时取消")

@@ -1,4 +1,6 @@
 """小程序端：购物车。"""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +11,8 @@ from app.models.cart import Cart
 from app.models.dish import Dish
 from app.schemas.cart import MAX_CART_QUANTITY, CartAdd, CartUpdate
 from app.schemas.common import R
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -89,6 +93,11 @@ def update_cart(body: CartUpdate, user_id: int = Depends(get_current_user_id), d
 
 @router.post("/cart/clear")
 def clear_cart(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    db.query(Cart).filter(Cart.user_id == user_id).delete()
-    db.commit()
+    try:
+        db.query(Cart).filter(Cart.user_id == user_id).delete()
+        db.commit()
+    except Exception:
+        logger.exception("清空购物车失败: user_id=%s", user_id)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="清空购物车失败，请重试")
     return R.ok(msg="购物车已清空")

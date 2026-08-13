@@ -72,7 +72,7 @@ def expire_pending_orders(db: Session, user_id: int | None = None) -> int:
     from app.services import wechat
 
     if wechat.DEV_MODE:
-        count = query.update({Order.status: STATUS_CANCELLED}, synchronize_session=False)
+        count = query.update({Order.status: STATUS_CANCELLED, Order.updated_at: utc_now()}, synchronize_session=False)
         if count:
             db.commit()
         return count
@@ -95,7 +95,7 @@ def mark_cancelled(db: Session, order: Order) -> bool:
     updated = db.query(Order).filter(
         Order.id == order.id,
         Order.status == STATUS_PENDING,
-    ).update({Order.status: STATUS_CANCELLED}, synchronize_session=False)
+    ).update({Order.status: STATUS_CANCELLED, Order.updated_at: utc_now()}, synchronize_session=False)
     db.commit()
     db.refresh(order)
     return updated == 1
@@ -105,7 +105,7 @@ def mark_done(db: Session, order: Order) -> bool:
     updated = db.query(Order).filter(
         Order.id == order.id,
         Order.status == STATUS_COOKING,
-    ).update({Order.status: STATUS_DONE}, synchronize_session=False)
+    ).update({Order.status: STATUS_DONE, Order.updated_at: utc_now()}, synchronize_session=False)
     db.commit()
     db.refresh(order)
     return updated == 1

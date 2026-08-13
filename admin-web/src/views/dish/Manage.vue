@@ -84,8 +84,8 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="form.status">
-            <el-radio :value="1">在售</el-radio>
-            <el-radio :value="0">下架</el-radio>
+            <el-radio :label="1">在售</el-radio>
+            <el-radio :label="0">下架</el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -219,8 +219,8 @@ async function onUpload(req) {
     form.image = data.url
     req.onSuccess?.(data)
     ElMessage.success('上传成功')
-  } catch (error) {
-    req.onError?.(error)
+  } catch (uploadError) {
+    req.onError?.(uploadError)
   }
   finally {
     if (session === formSession) uploading.value = false

@@ -75,6 +75,9 @@ export async function clearAllCart() {
     state.items = []
     uni.showToast({ title: '购物车已清空', icon: 'success' })
     return true
+  } catch (e) {
+    uni.showToast({ title: e?.message || '清空失败，请重试', icon: 'none' })
+    return false
   } finally {
     state.clearing = false
   }

@@ -60,8 +60,12 @@ async function clearAll() {
 }
 
 async function retry() {
-  await loginIfNeeded().catch(() => undefined)
-  await loadCart()
+  try {
+    await loginIfNeeded().catch(() => undefined)
+    await loadCart()
+  } catch (e) {
+    uni.showToast({ title: e?.message || '加载失败，请重试', icon: 'none' })
+  }
 }
 
 function goOrder() {

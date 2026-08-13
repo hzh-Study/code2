@@ -64,15 +64,19 @@ const error = ref(false)
 const deletingId = ref(null)
 const form = reactive({ id: null, name: '', sort_order: 0 })
 
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   error.value = false
   try {
-    list.value = await listCategories()
+    const data = await listCategories()
+    if (seq !== loadSeq) return  // 已有更新的请求，丢弃旧响应
+    list.value = data
   } catch (requestError) {
-    error.value = true
+    if (seq === loadSeq) error.value = true
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

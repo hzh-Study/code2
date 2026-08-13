@@ -94,7 +94,7 @@
           <el-descriptions-item label="方式">{{ detail.dining_mode_label }}</el-descriptions-item>
           <el-descriptions-item label="下单时间">{{ detail.created_at }}</el-descriptions-item>
           <el-descriptions-item label="支付时间">{{ detail.paid_at }}</el-descriptions-item>
-          <el-descriptions-item label="金额" :span="2">
+          <el-descriptions-item label="金额" :span="detailColumns">
             <span class="amount-lg">¥{{ Number(detail.total_amount).toFixed(2) }}</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -198,9 +198,9 @@ function onPageSizeChange(size) {
   load()
 }
 
-async function load() {
+async function load(silent = false) {
   const requestSeq = ++loadSeq
-  loading.value = true
+  if (!silent) loading.value = true
   error.value = false
   try {
     const params = Object.fromEntries(
@@ -220,15 +220,19 @@ function resetAndLoad() {
   filters.page = 1
   return load()
 }
+let detailSeq = 0
 async function openDetail(row) {
   if (detailLoadingId.value !== null) return
   detailLoadingId.value = row.id
+  const seq = ++detailSeq
   try {
-    detail.value = await orderDetail(row.id)
+    const data = await orderDetail(row.id)
+    if (seq !== detailSeq) return  // 已有更新的请求，丢弃旧响应
+    detail.value = data
     detailVisible.value = true
   } catch {
   } finally {
-    detailLoadingId.value = null
+    if (seq === detailSeq) detailLoadingId.value = null
   }
 }
 async function onComplete(row) {
@@ -255,7 +259,8 @@ onMounted(() => {
   load()
 })
 
-useAutoRefresh(load, 5000)
+// 后台刷新使用 silent 模式，避免已有数据时显示 loading 蒙层
+useAutoRefresh(() => load(true), 5000)
 
 onBeforeUnmount(() => {
   clearTimeout(keywordTimer)

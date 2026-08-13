@@ -16,6 +16,9 @@ request.interceptors.request.use((config) => {
   return config
 })
 
+// 防止并发 401 重复弹出 Toast 和重复导航
+let isHandling401 = false
+
 // 响应拦截器：统一处理业务错误
 request.interceptors.response.use(
   (response) => {
@@ -28,10 +31,14 @@ request.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('admin_token')
-      localStorage.removeItem('admin_username')
-      ElMessage.warning('登录已过期，请重新登录')
-      router.replace({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+      if (!isHandling401) {
+        isHandling401 = true
+        localStorage.removeItem('admin_token')
+        localStorage.removeItem('admin_username')
+        ElMessage.warning('登录已过期，请重新登录')
+        router.replace({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+        setTimeout(() => { isHandling401 = false }, 1000)
+      }
       return Promise.reject(new Error('未登录或登录已过期'))
     } else {
       ElMessage.error(error.response?.data?.msg || '网络错误')

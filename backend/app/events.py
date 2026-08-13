@@ -7,22 +7,25 @@ logger = logging.getLogger(__name__)
 
 # 已连接的客户端队列集合
 _subscribers: list[asyncio.Queue] = []
+_subscribers_lock = asyncio.Lock()
 
 
 def _broadcast(event_type: str, data: dict) -> None:
     """向所有已连接的 SSE 客户端广播事件。"""
     payload = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
     dead = []
-    for q in _subscribers:
+    # 遍历副本，避免迭代期间列表被修改
+    for q in list(_subscribers):
         try:
             q.put_nowait(payload)
         except asyncio.QueueFull:
             dead.append(q)
-    for q in dead:
-        try:
-            _subscribers.remove(q)
-        except ValueError:
-            pass
+    if dead:
+        for q in dead:
+            try:
+                _subscribers.remove(q)
+            except ValueError:
+                pass
 
 
 def emit_order_created(order_id: int, order_no: str, status: int) -> None:

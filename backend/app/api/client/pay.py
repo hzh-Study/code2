@@ -54,6 +54,7 @@ def prepay(
         return R.fail(2002, "订单状态不可支付")
     if is_expired(order.expire_at):
         expire_pending_orders(db, user_id)
+        db.refresh(order)
         if order.status == STATUS_PENDING:
             raise HTTPException(status_code=502, detail="订单关闭失败，请稍后重试")
         return R.fail(2002, "订单已超时取消")
